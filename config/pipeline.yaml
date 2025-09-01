@@ -1,0 +1,96 @@
+# MegaDetector Pipeline Configuration
+# Main configuration file for the camera trap animal detection and classification pipeline
+
+paths:
+  videos_raw: "data/videos_raw"
+  videos_work: "data/videos_work"  # optional: for re-encoded videos
+  md_json: "data/md_json"
+  tracks_json: "data/tracks_json"
+  candidates: "data/candidates"
+  autolabels: "data/autolabels"
+  cvat_exports: "data/cvat_exports"
+  datasets: "data/datasets/species_cls"
+  reports: "data/reports"
+
+# MegaDetector settings
+megadetector:
+  weights: "models/detectors/md_v5a.0.0.pt"
+  img_size: 960           # 960 or 1280
+  conf_threshold: 0.55    # confidence threshold for detections
+  iou_threshold: 0.55     # IoU threshold for NMS
+  classes: [0]            # only 'animal' class in MegaDetector
+  max_detections: 3       # max detections per frame
+  min_area: 10000         # minimum bbox area in pixels
+  frame_stride: 5         # process every Nth frame (saves compute)
+
+# ByteTrack tracking settings
+tracking:
+  track_thresh: 0.5       # high threshold for track initialization
+  track_buffer: 30        # frames to keep lost tracks
+  match_thresh: 0.8       # matching threshold
+  frame_rate: 30          # video frame rate (for track timing)
+  min_box_area: 10        # minimum bbox area for tracking
+
+# Frame sampling and crop extraction
+sampling:
+  strategy: "hybrid"      # "stride", "topk", or "hybrid"
+  frame_stride: 5         # sample every N frames within track
+  topk_per_track: 16      # or use top-K most confident frames
+  max_per_video: 30       # cap total crops per video
+  diversity:
+    enabled: true
+    iou_threshold: 0.9    # skip frames too similar to previous
+    min_area_ratio: 0.1   # require minimum bbox size variation
+  
+  # Quality filters
+  filters:
+    min_confidence: 0.5   # minimum detection confidence
+    min_area: 5000        # minimum crop area
+    max_border_ratio: 0.8 # reject if >80% of bbox touches image border
+    blur_threshold: 100   # Laplacian blur detection threshold
+
+# Auto-labeling from filename (weak supervision)
+autolabel:
+  enabled: true
+  
+  # Dominance rules - track must dominate the video
+  dominance:
+    min_track_coverage: 0.8     # track covers ≥80% of detection frames
+    max_secondary_coverage: 0.3  # no other track covers >30%
+    require_single_track: true   # prefer videos with only one substantial track
+  
+  # Quality rules
+  quality:
+    min_confidence_mean: 0.6    # average confidence across track
+    min_track_length: 8         # minimum frames in track
+    min_area_median: 8000       # median bbox area threshold
+    max_border_frames_ratio: 0.5 # max fraction of frames touching border
+  
+  # Species-specific exceptions (require manual review)
+  exceptions:
+    - "margay:ocelote"          # confusable pairs
+    - "gray_brocket:deer"
+  
+  # Quality control
+  spot_check_ratio: 0.1         # randomly review 10% of auto-labels
+
+# Dataset splitting strategy
+split:
+  strategy: "by_video"          # or "by_camera" to prevent data leakage
+  train: 0.7
+  validation: 0.15
+  test: 0.15
+  random_seed: 42
+
+# Logging and reporting
+logging:
+  level: "INFO"                 # DEBUG, INFO, WARNING, ERROR
+  save_reports: true
+  save_intermediate: true       # keep intermediate JSON files
+  progress_bars: true
+
+# Hardware settings
+hardware:
+  device: "cuda"                # "cuda", "cpu", or "auto"
+  batch_size: 32               # for batch processing
+  num_workers: 4               # dataloader workers

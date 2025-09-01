@@ -1,0 +1,17 @@
+# Species Configuration for Uruguayan Fauna Recognition
+# The 13 target species classes
+
+species:
+  - armadillo
+  - bird
+  - capybara
+  - cow
+  - dusky_legged_guan
+  - gray_brocket
+  - hare
+  - human
+  - margay
+  - skunk
+  - wild_boar
+  - unknown_animal
+  - no_animal
