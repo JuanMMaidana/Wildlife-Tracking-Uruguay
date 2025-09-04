@@ -1,0 +1,44 @@
+# Experiment 001: MegaDetector Parameter Calibration
+# Testing conf_threshold, frame_stride, and min_area_ratio combinations
+
+# Test dataset configuration
+dataset:
+  videos_glob: "data/test_md_vids/*.mp4"  # Your 21 test videos
+  sample_size: 0           # 0 = use all 21 videos found
+  deterministic: true      # Reproducible sampling
+  random_seed: 42
+
+# Output configuration
+outputs:
+  results_csv: "experiments/exp_001_md_calibration/results.csv"
+  samples_dir: "experiments/exp_001_md_calibration/samples"
+  overwrite: true          # Restart experiment from scratch
+
+# Parameter grid for sweep
+sweep:
+  conf_threshold: [0.15, 0.20, 0.25]    # Lower than current 0.55
+  frame_stride: [1, 2, 5]               # Test efficiency vs accuracy
+  min_area_ratio: [0.0025, 0.005, 0.01] # Relative to frame area (0.25%, 0.5%, 1%)
+
+# Pipeline overrides (applied to base config/pipeline.yaml)
+pipeline_overrides:
+  megadetector:
+    include_person: true      # Enable person detection for human class
+    include_vehicle: false    # Skip vehicles for now
+    weights: "models/detectors/md_v5a.0.0.pt"
+    iou_threshold: 0.55       # Keep NMS threshold constant
+    classes: [0, 1]           # 0=animal, 1=person
+    max_detections: 5         # Slightly higher for testing
+
+# Experiment execution settings
+run:
+  save_samples_per_video: 2   # Save 2 example frames per video for manual review
+  dry_run: false              # Set to true for testing sweep logic
+  random_seed: 42
+  timeout_per_video: 300      # 5 minutes max per video
+
+# Quality metrics to track
+metrics:
+  track_processing_time: true
+  track_memory_usage: true
+  save_detection_examples: true

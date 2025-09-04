@@ -43,7 +43,7 @@ def get_video_files(videos_dir: str) -> List[Path]:
         print(f"Videos directory not found: {videos_dir}")
         sys.exit(1)
     
-    video_extensions = {'.mp4', '.avi', '.mov', '.mkv'}
+    video_extensions = {'.mp4'}
     video_files = []
     
     for file_path in video_dir.iterdir():

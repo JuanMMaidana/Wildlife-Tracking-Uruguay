@@ -16,12 +16,14 @@ paths:
 megadetector:
   weights: "models/detectors/md_v5a.0.0.pt"
   img_size: 960           # 960 or 1280
-  conf_threshold: 0.55    # confidence threshold for detections
+  conf_threshold: 0.20    # confidence threshold (calibrated from 0.55)
   iou_threshold: 0.55     # IoU threshold for NMS
-  classes: [0]            # only 'animal' class in MegaDetector
-  max_detections: 3       # max detections per frame
-  min_area: 10000         # minimum bbox area in pixels
-  frame_stride: 5         # process every Nth frame (saves compute)
+  classes: [0, 1]         # 0=animal, 1=person (includes human class)
+  max_detections: 5       # max detections per frame
+  min_area_ratio: 0.005   # minimum bbox area as fraction of frame (replaces absolute min_area)
+  frame_stride: 2         # process every Nth frame (calibrated from 5)
+  include_person: true    # enable person detection for human species
+  include_vehicle: false  # exclude vehicles for now
 
 # ByteTrack tracking settings
 tracking:
