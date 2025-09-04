@@ -74,6 +74,11 @@ logs/
 *.pth
 *.ckpt
 
+# Allow documentation plots (high-quality visualizations for portfolio)
+!docs/
+!docs/plots/
+!docs/plots/**/*.png
+
 # OS generated files
 .DS_Store
 .DS_Store?
