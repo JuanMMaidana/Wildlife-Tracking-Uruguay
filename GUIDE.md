@@ -11,8 +11,9 @@
 - Defined 10-step implementation plan
 - Created this guide for progress tracking
 
-### 🚧 Step 1: Update config/pipeline.yaml with ByteTrack parameters
-**Status:** In Progress  
+### ✅ Step 1: Update config/pipeline.yaml with ByteTrack parameters
+**Status:** Completed  
+**Commit:** 2ceb01c  
 **Key Decisions:**
 - **Threshold hierarchy:** `md_export (0.20) ≤ det_thresh (0.40) ≤ track_thresh (0.60)`
 - **FPS handling:** Read real FPS from each video using cv2, calculate `fps_effective = fps / frame_stride`
@@ -41,13 +42,18 @@ tracking:
   include_person: true        # Track humans (in 13 species)
 ```
 
-### ⏳ Step 2: MD JSON Adapter and Validation
-**Status:** Pending
-- Load MD JSON outputs
-- Apply class mapping (person→human)  
-- Validate threshold hierarchy
-- Convert bboxes to pixels
-- Read real video FPS with cv2
+### ✅ Step 2: MD JSON Adapter and Validation
+**Status:** Completed  
+**Commit:** ed18a55  
+**Implemented:**
+- ✅ Load MD JSON outputs
+- ✅ Apply class mapping (person→human)  
+- ✅ Validate threshold hierarchy
+- ✅ Handle pixel bbox format (confirmed from existing MD script)
+- ✅ Read real video FPS with cv2
+- ✅ Build video paths from JSON stems: cow_0777.json → cow_0777.mp4
+- ✅ Graceful error handling with fallbacks
+- ✅ Preserve MD metadata + adapter statistics
 
 ### ⏳ Step 3: Enhanced Track Class
 **Status:** Pending
@@ -135,18 +141,18 @@ experiments/
 ```
 
 ## Validation Checklist
-- [ ] Threshold hierarchy: `md_export ≤ det_thresh ≤ track_thresh`
-- [ ] FPS read from video, fps_effective calculated correctly
+- [x] Threshold hierarchy: `md_export ≤ det_thresh ≤ track_thresh`
+- [x] FPS read from video, fps_effective calculated correctly
 - [ ] HIGH detections create tracks, LOW only recovers
-- [ ] Class mapping `person→human` applied
+- [x] Class mapping `person→human` applied
 - [ ] JSON schema matches specification exactly
 - [ ] Visualization shows H/L labels and track IDs
-- [ ] track_buffer_s converted to frames using fps_effective
+- [x] track_buffer_s converted to frames using fps_effective
 - [ ] Git SHA logged in tracking_code_version
 
 ## Commits Log
-- [ ] Step 1: Config updates with ByteTrack parameters
-- [ ] Step 2: MD JSON adapter with validation
+- [x] Step 1: Config updates with ByteTrack parameters (2ceb01c)
+- [x] Step 2: MD JSON adapter with validation (ed18a55)
 - [ ] Step 3: Enhanced Track class  
 - [ ] Step 4: HIGH pass implementation
 - [ ] Step 5: LOW pass recovery
