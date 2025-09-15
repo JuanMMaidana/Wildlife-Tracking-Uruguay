@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import yaml
 import cv2
+import numpy as np
 
 def load_config(config_path: str = "config/pipeline.yaml") -> Dict:
     """Load pipeline configuration"""
@@ -30,6 +31,99 @@ def validate_thresholds(config: Dict):
         )
     
     print(f"✅ Threshold hierarchy valid: {md_export} ≤ {det_thresh} ≤ {track_thresh}")
+
+def calculate_iou(box1: List[float], box2: List[float]) -> float:
+    """Calculate IoU between two bounding boxes in [x, y, w, h] format"""
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+    
+    # Convert to [x1, y1, x2, y2]
+    x1_min, y1_min, x1_max, y1_max = x1, y1, x1 + w1, y1 + h1
+    x2_min, y2_min, x2_max, y2_max = x2, y2, x2 + w2, y2 + h2
+    
+    # Calculate intersection
+    intersection_x1 = max(x1_min, x2_min)
+    intersection_y1 = max(y1_min, y2_min)
+    intersection_x2 = min(x1_max, x2_max)
+    intersection_y2 = min(y1_max, y2_max)
+    
+    if intersection_x2 <= intersection_x1 or intersection_y2 <= intersection_y1:
+        return 0.0
+    
+    intersection_area = (intersection_x2 - intersection_x1) * (intersection_y2 - intersection_y1)
+    
+    # Calculate union
+    area1 = w1 * h1
+    area2 = w2 * h2
+    union_area = area1 + area2 - intersection_area
+    
+    return intersection_area / union_area if union_area > 0 else 0.0
+
+class Track:
+    """Enhanced Track class with ByteTrack lifecycle support"""
+    
+    def __init__(self, track_id: int, detection: dict, frame_idx: int):
+        """Initialize track with first detection"""
+        self.track_id = track_id
+        self.detections = []           # List of detection dicts with metadata
+        self.class_name = detection['class']  # 'animal' or 'human'
+        self.start_frame = frame_idx
+        self.last_frame = frame_idx
+        self.misses = 0                # Consecutive frames without match
+        
+        # Add first detection with metadata
+        self.add_detection(detection, frame_idx, src='high', iou_pred=1.0)
+    
+    def add_detection(self, detection: dict, frame_idx: int, src: str, iou_pred: float):
+        """Add detection with ByteTrack metadata"""
+        detection_entry = {
+            'frame': frame_idx,
+            'bbox': detection['bbox'],     # [x, y, w, h] in pixels
+            'confidence': detection['score'],
+            'src': src,                    # 'high' or 'low'
+            'iou_pred': iou_pred          # IoU with predicted bbox
+        }
+        
+        self.detections.append(detection_entry)
+        self.last_frame = frame_idx
+        self.misses = 0  # Reset miss counter
+    
+    def predict_next_bbox(self) -> List[float]:
+        """Motion prediction (naive: return last bbox)"""
+        if not self.detections:
+            return [0, 0, 0, 0]
+        return self.detections[-1]['bbox']
+    
+    def mark_miss(self):
+        """Increment miss counter (called when no match found)"""
+        self.misses += 1
+    
+    def should_remove(self, current_frame: int, track_buffer_frames: int) -> bool:
+        """Check if track should be removed based on buffer"""
+        return self.misses > track_buffer_frames
+    
+    def get_representative_frame(self) -> dict:
+        """Get representative frame (highest confidence detection)"""
+        if not self.detections:
+            return None
+        
+        return max(self.detections, key=lambda d: d['confidence'])
+    
+    def to_dict(self) -> dict:
+        """Export to JSON schema format for final output"""
+        rep_frame = self.get_representative_frame()
+        
+        return {
+            'track_id': self.track_id,
+            'class': self.class_name,
+            'start_frame': self.start_frame,
+            'end_frame': self.last_frame,
+            'length': len(self.detections),
+            'rep_frame': rep_frame['frame'] if rep_frame else self.start_frame,
+            'rep_confidence': rep_frame['confidence'] if rep_frame else 0.0,
+            'rep_bbox': rep_frame['bbox'] if rep_frame else [0, 0, 0, 0],
+            'detections': self.detections
+        }
 
 def get_video_info(video_path: Path) -> Optional[Dict]:
     """Read actual video FPS and dimensions using cv2"""
@@ -192,6 +286,240 @@ def get_md_json_files(md_json_path: str) -> List[Path]:
     else:
         raise ValueError(f"MD JSON path not found: {md_json_path}")
 
+def greedy_assignment(cost_matrix: np.ndarray, match_thresh: float) -> List[Tuple[int, int]]:
+    """Simple greedy assignment for detection-track matching"""
+    matches = []
+    if cost_matrix.size == 0:
+        return matches
+    
+    num_dets, num_tracks = cost_matrix.shape
+    used_dets = set()
+    used_tracks = set()
+    
+    # Sort by highest IoU (cost_matrix contains IoU values)
+    indices = np.unravel_index(np.argsort(cost_matrix.ravel())[::-1], cost_matrix.shape)
+    
+    for det_idx, track_idx in zip(indices[0], indices[1]):
+        if det_idx in used_dets or track_idx in used_tracks:
+            continue
+        if cost_matrix[det_idx, track_idx] >= match_thresh:
+            matches.append((det_idx, track_idx))
+            used_dets.add(det_idx)
+            used_tracks.add(track_idx)
+    
+    return matches
+
+def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dict:
+    """
+    Run ByteTrack algorithm on frame detections
+    
+    Args:
+        frame_detections: dict[frame_idx] -> list[detection]
+        video_info: video metadata including fps_effective
+        config: pipeline configuration
+    
+    Returns:
+        tracking results in JSON schema format
+    """
+    tracking_config = config['tracking']
+    
+    # Extract thresholds
+    track_thresh = tracking_config['track_thresh']  # 0.60 - HIGH threshold
+    det_thresh = tracking_config['det_thresh']      # 0.40 - LOW threshold  
+    match_thresh = tracking_config['match_thresh']  # 0.60 - IoU threshold
+    min_track_len = tracking_config['min_track_len'] # 3 - minimum track length
+    
+    # Calculate track buffer in frames
+    track_buffer_s = tracking_config['track_buffer_s']  # 0.8 seconds
+    fps_effective = video_info['fps_effective']
+    track_buffer_frames = round(track_buffer_s * fps_effective)
+    
+    print(f"  ByteTrack config: HIGH={track_thresh}, LOW={det_thresh}, "
+          f"match_IoU={match_thresh}, buffer={track_buffer_frames}f")
+    
+    # Initialize tracking state
+    active_tracks = []    # Currently active tracks
+    lost_tracks = []      # Recently lost tracks (within buffer)
+    finished_tracks = []  # Completed tracks
+    next_track_id = 1
+    
+    # Process frames in order
+    frames = sorted(frame_detections.keys())
+    
+    for frame_idx in frames:
+        detections = frame_detections[frame_idx]
+        
+        if not detections:
+            # No detections - mark all tracks as missed
+            for track in active_tracks:
+                track.mark_miss()
+            for track in lost_tracks:
+                track.mark_miss()
+            continue
+        
+        # Split detections into HIGH and LOW confidence
+        high_detections = [d for d in detections if d['score'] >= track_thresh]
+        low_detections = [d for d in detections if det_thresh <= d['score'] < track_thresh]
+        
+        print(f"    Frame {frame_idx}: {len(high_detections)} HIGH, {len(low_detections)} LOW detections")
+        
+        # HIGH PASS: Match high-confidence detections with active tracks
+        if active_tracks and high_detections:
+            # Calculate IoU matrix between HIGH detections and active tracks
+            iou_matrix = np.zeros((len(high_detections), len(active_tracks)))
+            for det_idx, detection in enumerate(high_detections):
+                for track_idx, track in enumerate(active_tracks):
+                    predicted_bbox = track.predict_next_bbox()
+                    iou_matrix[det_idx, track_idx] = calculate_iou(detection['bbox'], predicted_bbox)
+            
+            # Find matches using greedy assignment
+            matches = greedy_assignment(iou_matrix, match_thresh)
+            
+            # Update matched tracks
+            matched_det_indices = set()
+            matched_track_indices = set()
+            
+            for det_idx, track_idx in matches:
+                detection = high_detections[det_idx]
+                track = active_tracks[track_idx]
+                iou_pred = iou_matrix[det_idx, track_idx]
+                
+                # Only match if same class
+                if detection['class'] == track.class_name:
+                    track.add_detection(detection, frame_idx, src='high', iou_pred=iou_pred)
+                    matched_det_indices.add(det_idx)
+                    matched_track_indices.add(track_idx)
+            
+            # Move unmatched active tracks to lost
+            new_active_tracks = []
+            for track_idx, track in enumerate(active_tracks):
+                if track_idx in matched_track_indices:
+                    new_active_tracks.append(track)
+                else:
+                    track.mark_miss()
+                    lost_tracks.append(track)
+            active_tracks = new_active_tracks
+            
+            # Create new tracks for unmatched HIGH detections
+            for det_idx, detection in enumerate(high_detections):
+                if det_idx not in matched_det_indices:
+                    new_track = Track(next_track_id, detection, frame_idx)
+                    active_tracks.append(new_track)
+                    next_track_id += 1
+        
+        elif high_detections:
+            # No active tracks - create new tracks for all HIGH detections
+            for detection in high_detections:
+                new_track = Track(next_track_id, detection, frame_idx)
+                active_tracks.append(new_track)
+                next_track_id += 1
+        
+        else:
+            # No HIGH detections - mark all active tracks as missed
+            for track in active_tracks:
+                track.mark_miss()
+            # Move all to lost
+            lost_tracks.extend(active_tracks)
+            active_tracks = []
+        
+        # LOW PASS: Attempt to recover lost tracks with low-confidence detections
+        if lost_tracks and low_detections:
+            # Calculate IoU matrix between LOW detections and lost tracks
+            iou_matrix = np.zeros((len(low_detections), len(lost_tracks)))
+            for det_idx, detection in enumerate(low_detections):
+                for track_idx, track in enumerate(lost_tracks):
+                    predicted_bbox = track.predict_next_bbox()
+                    iou_matrix[det_idx, track_idx] = calculate_iou(detection['bbox'], predicted_bbox)
+            
+            # Find recovery matches using greedy assignment
+            matches = greedy_assignment(iou_matrix, match_thresh)
+            
+            # Recover matched tracks
+            recovered_track_indices = set()
+            used_low_det_indices = set()
+            
+            for det_idx, track_idx in matches:
+                detection = low_detections[det_idx]
+                track = lost_tracks[track_idx]
+                iou_pred = iou_matrix[det_idx, track_idx]
+                
+                # Only recover if same class
+                if detection['class'] == track.class_name:
+                    track.add_detection(detection, frame_idx, src='low', iou_pred=iou_pred)
+                    active_tracks.append(track)
+                    recovered_track_indices.add(track_idx)
+                    used_low_det_indices.add(det_idx)
+            
+            # Remove recovered tracks from lost_tracks
+            new_lost_tracks = []
+            for track_idx, track in enumerate(lost_tracks):
+                if track_idx not in recovered_track_indices:
+                    track.mark_miss()
+                    new_lost_tracks.append(track)
+            lost_tracks = new_lost_tracks
+        
+        else:
+            # No LOW detections or lost tracks - mark all lost tracks as missed
+            for track in lost_tracks:
+                track.mark_miss()
+        
+        # Track cleanup - remove tracks that exceeded buffer
+        still_active = []
+        for track in active_tracks:
+            if track.should_remove(frame_idx, track_buffer_frames):
+                finished_tracks.append(track)
+            else:
+                still_active.append(track)
+        active_tracks = still_active
+        
+        still_lost = []
+        for track in lost_tracks:
+            if track.should_remove(frame_idx, track_buffer_frames):
+                finished_tracks.append(track)
+            else:
+                still_lost.append(track)
+        lost_tracks = still_lost
+    
+    # Add remaining tracks to finished
+    finished_tracks.extend(active_tracks)
+    finished_tracks.extend(lost_tracks)
+    
+    # Filter tracks by minimum length and convert to output format
+    valid_tracks = []
+    for track in finished_tracks:
+        if len(track.detections) >= min_track_len:
+            valid_tracks.append(track.to_dict())
+    
+    # Sort tracks by track_id
+    valid_tracks.sort(key=lambda x: x['track_id'])
+    
+    # Build final output
+    result = {
+        'video': video_info.get('video_path', 'unknown.mp4'),
+        'video_info': {
+            'fps': video_info['fps'],
+            'fps_effective': fps_effective,
+            'width': video_info.get('width'),
+            'height': video_info.get('height'),
+            'total_frames': video_info.get('total_frames')
+        },
+        'tracking_config': {
+            'track_thresh': track_thresh,
+            'det_thresh': det_thresh,
+            'match_thresh': match_thresh,
+            'track_buffer_frames': track_buffer_frames,
+            'min_track_len': min_track_len
+        },
+        'tracks': valid_tracks,
+        'summary': {
+            'total_tracks': len(valid_tracks),
+            'total_detections': sum(len(track['detections']) for track in valid_tracks),
+            'frames_processed': len(frames)
+        }
+    }
+    
+    return result
+
 def main():
     """Main processing function"""
     args = parse_args()
@@ -230,21 +558,17 @@ def main():
                 print(f"  No detections exported for {md_file.name}")
                 continue
             
-            # TODO: Implement ByteTrack algorithm here
-            print(f"  TODO: Run ByteTrack on {len(frame_detections)} frames")
+            # Run ByteTrack algorithm
+            tracks_data = run_bytetrack(frame_detections, video_info, config)
             
-            # For now, just save adapter output for testing
-            output_file = out_json_dir / f"{md_file.stem}_adapter_test.json"
-            test_output = {
-                'video': md_file.stem + '.mp4',
-                'frame_detections': {str(k): v for k, v in frame_detections.items()},
-                'video_info': video_info
-            }
+            # Save tracking results
+            output_file = out_json_dir / f"{md_file.stem}.json"
             
             with open(output_file, 'w') as f:
-                json.dump(test_output, f, indent=2)
+                json.dump(tracks_data, f, indent=2)
             
-            print(f"  Saved test output: {output_file}")
+            print(f"  Saved tracking results: {output_file}")
+            print(f"  Created {len(tracks_data['tracks'])} tracks")
             
         except Exception as e:
             print(f"Error processing {md_file.name}: {str(e)}")

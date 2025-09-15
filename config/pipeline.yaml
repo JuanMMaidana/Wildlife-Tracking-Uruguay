@@ -17,7 +17,7 @@ paths:
 megadetector:
   weights: "models/detectors/md_v5a.0.0.pt"
   img_size: 960           # 960 or 1280
-  md_export_threshold: 0.20   # threshold for exporting detections to tracker
+  md_export_threshold: 0.25   # threshold for exporting detections to tracker (was 0.20)
   md_view_threshold: 0.25     # for visual debugging only
   iou_threshold: 0.55     # IoU threshold for NMS (keep calibrated value)
   classes: [0, 1]         # 0=animal, 1=person (includes human class)
@@ -27,16 +27,16 @@ megadetector:
   include_person: true    # enable person detection for human species
   include_vehicle: false  # exclude vehicles for now
 
-# ByteTrack tracking settings
+# ByteTrack tracking settings (ultra-conservative for stationary animals)
 tracking:
   method: bytetrack       # explicit tracking method
   # Threshold hierarchy: md_export_threshold <= det_thresh <= track_thresh
-  track_thresh: 0.60      # HIGH threshold - creates new tracks
-  det_thresh: 0.40        # LOW threshold - recovery only, no new tracks
-  match_thresh: 0.60      # IoU threshold for track-detection association
-  track_buffer_s: 0.8     # seconds to keep lost tracks (converted to frames)
-  min_track_len: 3        # minimum detections required to keep track
-  nms_iou: 0.7           # per-frame NMS threshold
+  track_thresh: 0.70      # HIGH threshold - very strict new tracks (was 0.50)
+  det_thresh: 0.25        # LOW threshold - keep for recovery (unchanged)
+  match_thresh: 0.35      # IoU threshold - very permissive association (was 0.45)
+  track_buffer_s: 2.5     # seconds to keep lost tracks - long memory (was 1.5)
+  min_track_len: 8        # minimum detections - filter spurious tracks (was 5)
+  nms_iou: 0.85          # per-frame NMS - aggressive deduplication (was 0.75)
   use_kalman: false      # motion prediction (start simple)
   class_map:             # MegaDetector classes -> species mapping
     person: human

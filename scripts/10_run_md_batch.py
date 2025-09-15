@@ -16,15 +16,14 @@ import cv2
 import torch
 import yaml
 from tqdm import tqdm
-from ultralytics import YOLO
 
 def load_config(config_path: str = "config/pipeline.yaml") -> Dict:
     """Load pipeline configuration"""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def setup_model(config: Dict) -> YOLO:
-    """Initialize MegaDetector model"""
+def setup_model(config: Dict):
+    """Initialize MegaDetector model using YOLOv5"""
     model_path = config['megadetector']['weights']
     
     if not os.path.exists(model_path):
@@ -33,7 +32,13 @@ def setup_model(config: Dict) -> YOLO:
         print("https://github.com/microsoft/CameraTraps/releases")
         sys.exit(1)
     
-    model = YOLO(model_path)
+    # Load MegaDetector using torch.hub (YOLOv5 compatible)
+    print(f"Loading MegaDetector from {model_path}...")
+    model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path, trust_repo=True)
+    
+    # Set model to evaluation mode
+    model.eval()
+    
     return model
 
 def get_video_files(videos_dir: str) -> List[Path]:
@@ -73,7 +78,7 @@ def extract_frames_with_stride(video_path: Path, frame_stride: int = 5) -> List[
     
     return frames
 
-def process_video(video_path: Path, model: YOLO, config: Dict) -> Dict:
+def process_video(video_path: Path, model, config: Dict) -> Dict:
     """Process single video with MegaDetector"""
     md_config = config['megadetector']
     
@@ -93,46 +98,48 @@ def process_video(video_path: Path, model: YOLO, config: Dict) -> Dict:
             'info': {'total_frames': 0, 'processed_frames': 0}
         }
     
+    # Calculate minimum area in pixels from ratio
+    sample_frame = frames[0][1]  # Get first frame
+    frame_height, frame_width = sample_frame.shape[:2]
+    min_area = md_config['min_area_ratio'] * frame_width * frame_height
+    
     detections = []
     
     # Process frames in batches
     for frame_idx, frame in tqdm(frames, desc=f"Processing {video_path.name}"):
         
-        # Run detection
-        results = model(
-            frame,
-            conf=md_config['conf_threshold'],
-            iou=md_config['iou_threshold'],
-            classes=md_config['classes'],
-            max_det=md_config['max_detections'],
-            verbose=False
-        )
+        # Run detection (YOLOv5 format)
+        model.conf = md_config['md_export_threshold']  # Use md_export_threshold from config
+        model.iou = md_config['iou_threshold']
+        model.classes = md_config['classes']
+        model.max_det = md_config['max_detections']
         
-        # Extract detections for this frame
+        results = model(frame, size=md_config['img_size'])
+        
+        # Extract detections for this frame (YOLOv5 format)
         frame_detections = []
         
-        if results and len(results) > 0:
-            result = results[0]  # Single image result
+        # YOLOv5 returns pandas DataFrame in results.pandas().xyxy[0]
+        if results and len(results.pandas().xyxy) > 0:
+            detections_df = results.pandas().xyxy[0]
             
-            if result.boxes is not None and len(result.boxes) > 0:
-                boxes = result.boxes.xyxy.cpu().numpy()  # x1, y1, x2, y2
-                confidences = result.boxes.conf.cpu().numpy()
-                classes = result.boxes.cls.cpu().numpy()
+            for _, detection in detections_df.iterrows():
+                x1, y1, x2, y2 = detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']
+                conf = detection['confidence']
+                cls = int(detection['class'])
                 
-                for box, conf, cls in zip(boxes, confidences, classes):
-                    x1, y1, x2, y2 = box
-                    width = x2 - x1
-                    height = y2 - y1
-                    area = width * height
-                    
-                    # Filter by minimum area
-                    if area >= md_config['min_area']:
-                        frame_detections.append({
-                            'bbox': [float(x1), float(y1), float(width), float(height)],  # x, y, w, h format
-                            'confidence': float(conf),
-                            'class': int(cls),
-                            'area': float(area)
-                        })
+                width = x2 - x1
+                height = y2 - y1
+                area = width * height
+                
+                # Filter by minimum area
+                if area >= min_area:
+                    frame_detections.append({
+                        'bbox': [float(x1), float(y1), float(width), float(height)],  # x, y, w, h format
+                        'confidence': float(conf),
+                        'class': int(cls),
+                        'area': float(area)
+                    })
         
         # Only save frame if it has detections
         if frame_detections:
@@ -153,8 +160,8 @@ def process_video(video_path: Path, model: YOLO, config: Dict) -> Dict:
             'frame_stride': md_config['frame_stride'],
             'model_config': {
                 'weights': md_config['weights'],
-                'conf_threshold': md_config['conf_threshold'],
-                'min_area': md_config['min_area']
+                'conf_threshold': md_config['md_export_threshold'],
+                'min_area': min_area
             }
         }
     }
@@ -177,15 +184,23 @@ def save_detections(detections: Dict, output_dir: str, video_name: str):
 
 def main():
     """Main processing function"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Run MegaDetector on video batch')
+    parser.add_argument('--video-dir', help='Directory containing videos to process')
+    parser.add_argument('--config', default='config/pipeline.yaml', help='Config file path')
+    args = parser.parse_args()
+    
     # Load configuration
-    config = load_config()
+    config = load_config(args.config)
     
     # Setup model
     print("Loading MegaDetector model...")
     model = setup_model(config)
     
-    # Get video files
-    video_files = get_video_files(config['paths']['videos_raw'])
+    # Get video files - use provided directory or config default
+    video_dir = args.video_dir or config['paths']['videos_raw']
+    video_files = get_video_files(video_dir)
     print(f"Found {len(video_files)} video files")
     
     if not video_files:
