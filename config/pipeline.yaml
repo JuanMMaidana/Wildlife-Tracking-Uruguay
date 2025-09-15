@@ -5,33 +5,43 @@ paths:
   videos_raw: "data/videos_raw"
   videos_work: "data/videos_work"  # optional: for re-encoded videos
   md_json: "data/md_json"
-  tracks_json: "data/tracks_json"
+  tracks_json: "data/tracking_json"  # ByteTrack outputs (consistent naming)
   candidates: "data/candidates"
   autolabels: "data/autolabels"
   cvat_exports: "data/cvat_exports"
   datasets: "data/datasets/species_cls"
   reports: "data/reports"
+  preview_out: "outputs/preview"    # visualization outputs
 
 # MegaDetector settings
 megadetector:
   weights: "models/detectors/md_v5a.0.0.pt"
   img_size: 960           # 960 or 1280
-  conf_threshold: 0.20    # confidence threshold (calibrated from 0.55)
-  iou_threshold: 0.55     # IoU threshold for NMS
+  md_export_threshold: 0.25   # threshold for exporting detections to tracker (was 0.20)
+  md_view_threshold: 0.25     # for visual debugging only
+  iou_threshold: 0.55     # IoU threshold for NMS (keep calibrated value)
   classes: [0, 1]         # 0=animal, 1=person (includes human class)
   max_detections: 5       # max detections per frame
-  min_area_ratio: 0.005   # minimum bbox area as fraction of frame (replaces absolute min_area)
+  min_area_ratio: 0.005   # minimum bbox area as fraction of frame (calibrated)
   frame_stride: 2         # process every Nth frame (calibrated from 5)
   include_person: true    # enable person detection for human species
   include_vehicle: false  # exclude vehicles for now
 
-# ByteTrack tracking settings
+# ByteTrack tracking settings (ultra-conservative for stationary animals)
 tracking:
-  track_thresh: 0.5       # high threshold for track initialization
-  track_buffer: 30        # frames to keep lost tracks
-  match_thresh: 0.8       # matching threshold
-  frame_rate: 30          # video frame rate (for track timing)
-  min_box_area: 10        # minimum bbox area for tracking
+  method: bytetrack       # explicit tracking method
+  # Threshold hierarchy: md_export_threshold <= det_thresh <= track_thresh
+  track_thresh: 0.70      # HIGH threshold - very strict new tracks (was 0.50)
+  det_thresh: 0.25        # LOW threshold - keep for recovery (unchanged)
+  match_thresh: 0.35      # IoU threshold - very permissive association (was 0.45)
+  track_buffer_s: 2.5     # seconds to keep lost tracks - long memory (was 1.5)
+  min_track_len: 8        # minimum detections - filter spurious tracks (was 5)
+  nms_iou: 0.85          # per-frame NMS - aggressive deduplication (was 0.75)
+  use_kalman: false      # motion prediction (start simple)
+  class_map:             # MegaDetector classes -> species mapping
+    person: human
+    animal: animal
+  include_person: true   # track humans (included in 13 species classes)
 
 # Frame sampling and crop extraction
 sampling:
