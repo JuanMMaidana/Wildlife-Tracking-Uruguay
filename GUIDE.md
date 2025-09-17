@@ -92,40 +92,67 @@ tracking:
 - LOW-confidence recovery essential for maintaining track continuity
 - Ultra-permissive association critical for stationary animals with moving parts
 
-### ⏳ Step 4: HIGH Pass Implementation
-**Status:** Pending
-- Hungarian matching for confident detections
-- Create new tracks for unmatched HIGH detections
+### ✅ Step 4: HIGH Pass Implementation  
+**Status:** Completed (within Step 3)
+**Implemented:**
+- ✅ Greedy IoU assignment for confident detections
+- ✅ New track creation for unmatched HIGH detections
+- ✅ Class-aware matching (animal/human separation)
 
-### ⏳ Step 5: LOW Pass Recovery
-**Status:** Pending
-- Recovery-only for missed tracks
-- No new track creation from LOW detections
+### ✅ Step 5: LOW Pass Recovery
+**Status:** Completed (within Step 3)  
+**Implemented:**
+- ✅ Recovery-only for lost tracks (no new track creation)
+- ✅ LOW detections never spawn new tracks
+- ✅ Track state management (active/lost/finished)
 
-### ⏳ Step 6: NMS and Hungarian Integration
-**Status:** Pending
-- Per-frame NMS before HIGH/LOW split
-- Hungarian assignment optimization
+### ✅ Step 6: NMS and Hungarian Integration
+**Status:** Completed
+**Implemented:**
+- ✅ Upgraded greedy → Hungarian assignment using `scipy.optimize.linear_sum_assignment`
+- ✅ Explicit per-frame NMS before HIGH/LOW split 
+- ✅ Optimal bipartite matching for track-detection associations
+- ✅ Configurable NMS threshold (0.85) for aggressive deduplication
 
-### ⏳ Step 7: CLI Interface
-**Status:** Pending
-- Full argument parsing
-- Config validation
+### ✅ Step 7: Enhanced CLI Interface  
+**Status:** Completed
+**Implemented:**
+- ✅ Enhanced validation with detailed error messages and recommendations
+- ✅ Configuration warnings for extreme parameter values
+- ✅ Ultra-conservative mode detection and explanation
+- ✅ Progress reporting with emoji indicators
+- ✅ Comprehensive path resolution and validation
+- ✅ Processing summary with statistics
 
-### ⏳ Step 8: JSON Export Schema
-**Status:** Pending
-- Exact schema with metadata
-- fps_effective, tracking_code_version, git SHA
+### ✅ Step 8: Enhanced JSON Export Schema
+**Status:** Completed
+**Implemented:**
+- ✅ `schema_version: "1.0"` for versioning
+- ✅ `tracking_code_version` with git SHA for reproducibility
+- ✅ Standardized field names and structure
+- ✅ `validation_status` checklist in output
+- ✅ Enhanced metadata: method, assignment type, frame_size
+- ✅ Comprehensive summary statistics
 
-### ⏳ Step 9: Visualization Script
-**Status:** Pending
-- Track overlays with H/L labels
-- Color coding by track ID
+### ✅ Step 9: Visualization Script
+**Status:** Completed
+**Implemented:**
+- ✅ Track overlays with H/L detection source labels
+- ✅ Color coding by track ID with distinct HSV colors
+- ✅ Frame information and legend overlays
+- ✅ Export to outputs/preview/ with organized subdirectories
+- ✅ Video creation capability (MP4 output)
+- ✅ Configurable frame sampling and quality settings
 
-### ⏳ Step 10: Testing & Validation
-**Status:** Pending
-- End-to-end testing
-- Create exp_002_tracking/ artifacts
+### ✅ Step 10: Testing & Validation  
+**Status:** Completed
+**Implemented:**
+- ✅ Comprehensive evaluation script (22_evaluate_tracking.py)
+- ✅ Performance metrics extraction and CSV export
+- ✅ Species-specific analysis and reporting
+- ✅ Recovery effectiveness measurement
+- ✅ Research artifacts in exp_002_tracking/
+- ✅ Publication-ready plots and comprehensive markdown reports
 
 ## Key Technical Decisions
 

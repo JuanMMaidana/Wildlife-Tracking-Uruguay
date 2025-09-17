@@ -2,7 +2,7 @@
 # Main configuration file for the camera trap animal detection and classification pipeline
 
 paths:
-  videos_raw: "data/videos_raw"
+  videos_raw: "data/test_md_vids"
   videos_work: "data/videos_work"  # optional: for re-encoded videos
   md_json: "data/md_json"
   tracks_json: "data/tracking_json"  # ByteTrack outputs (consistent naming)

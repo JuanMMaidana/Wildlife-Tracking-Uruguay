@@ -6,12 +6,14 @@ Converts MD JSON detections into coherent animal tracks
 
 import argparse
 import json
+import subprocess
 import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import yaml
 import cv2
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 def load_config(config_path: str = "config/pipeline.yaml") -> Dict:
     """Load pipeline configuration"""
@@ -19,18 +21,46 @@ def load_config(config_path: str = "config/pipeline.yaml") -> Dict:
         return yaml.safe_load(f)
 
 def validate_thresholds(config: Dict):
-    """Validate ByteTrack threshold hierarchy: md_export <= det_thresh <= track_thresh"""
-    md_export = config['megadetector']['md_export_threshold']  # 0.20
-    det_thresh = config['tracking']['det_thresh']              # 0.40  
-    track_thresh = config['tracking']['track_thresh']          # 0.60
+    """Enhanced validation of ByteTrack threshold hierarchy and configuration"""
+    md_export = config['megadetector']['md_export_threshold']
+    det_thresh = config['tracking']['det_thresh']
+    track_thresh = config['tracking']['track_thresh']
     
+    print("🔍 Validating ByteTrack configuration...")
+    
+    # Validate threshold hierarchy
     if not (md_export <= det_thresh <= track_thresh):
-        raise ValueError(
-            f"Threshold hierarchy violated: "
-            f"md_export_threshold({md_export}) <= det_thresh({det_thresh}) <= track_thresh({track_thresh})"
-        )
+        print(f"❌ THRESHOLD HIERARCHY ERROR:")
+        print(f"   Current: md_export({md_export}) > det_thresh({det_thresh}) > track_thresh({track_thresh})")
+        print(f"   Required: md_export_threshold ≤ det_thresh ≤ track_thresh")
+        print(f"   Recommendation: Lower md_export_threshold to {det_thresh} or adjust thresholds")
+        raise ValueError("Threshold hierarchy validation failed - see above for details")
+    
+    # Validate reasonable ranges
+    warnings = []
+    if track_thresh < 0.3:
+        warnings.append(f"track_thresh ({track_thresh}) very low - may create many spurious tracks")
+    if track_thresh > 0.8:
+        warnings.append(f"track_thresh ({track_thresh}) very high - may miss legitimate tracks")
+    if det_thresh < 0.1:
+        warnings.append(f"det_thresh ({det_thresh}) very low - may recover too much noise")
+    
+    # Check for ultra-conservative mode
+    match_thresh = config['tracking']['match_thresh']
+    if match_thresh < 0.4:
+        print(f"📊 Ultra-conservative tracking mode detected (match_thresh={match_thresh})")
+        print("   This configuration optimized for stationary animals with pose variation")
     
     print(f"✅ Threshold hierarchy valid: {md_export} ≤ {det_thresh} ≤ {track_thresh}")
+    
+    if warnings:
+        print("⚠️  Configuration warnings:")
+        for warning in warnings:
+            print(f"   - {warning}")
+    
+    print(f"🎯 Tracking mode: {config['tracking']['method']} with hungarian assignment")
+    print(f"📐 Parameters: buffer={config['tracking']['track_buffer_s']}s, min_len={config['tracking']['min_track_len']}")
+    print()
 
 def calculate_iou(box1: List[float], box2: List[float]) -> float:
     """Calculate IoU between two bounding boxes in [x, y, w, h] format"""
@@ -286,28 +316,56 @@ def get_md_json_files(md_json_path: str) -> List[Path]:
     else:
         raise ValueError(f"MD JSON path not found: {md_json_path}")
 
-def greedy_assignment(cost_matrix: np.ndarray, match_thresh: float) -> List[Tuple[int, int]]:
-    """Simple greedy assignment for detection-track matching"""
+def hungarian_assignment(cost_matrix: np.ndarray, match_thresh: float) -> List[Tuple[int, int]]:
+    """Optimal Hungarian assignment for detection-track matching"""
     matches = []
     if cost_matrix.size == 0:
         return matches
     
-    num_dets, num_tracks = cost_matrix.shape
-    used_dets = set()
-    used_tracks = set()
+    # Convert IoU to cost (Hungarian minimizes, but we want to maximize IoU)
+    cost_matrix_inv = 1.0 - cost_matrix
     
-    # Sort by highest IoU (cost_matrix contains IoU values)
-    indices = np.unravel_index(np.argsort(cost_matrix.ravel())[::-1], cost_matrix.shape)
+    # Set high cost for matches below threshold (effectively infinite cost)
+    cost_matrix_inv[cost_matrix < match_thresh] = 1e6
     
-    for det_idx, track_idx in zip(indices[0], indices[1]):
-        if det_idx in used_dets or track_idx in used_tracks:
-            continue
+    # Hungarian assignment
+    det_indices, track_indices = linear_sum_assignment(cost_matrix_inv)
+    
+    # Filter valid matches (only those above threshold)
+    for det_idx, track_idx in zip(det_indices, track_indices):
         if cost_matrix[det_idx, track_idx] >= match_thresh:
             matches.append((det_idx, track_idx))
-            used_dets.add(det_idx)
-            used_tracks.add(track_idx)
     
     return matches
+
+def apply_nms_per_frame(detections: List[dict], nms_threshold: float) -> List[dict]:
+    """Apply Non-Maximum Suppression to detections in a single frame"""
+    if len(detections) <= 1:
+        return detections
+    
+    # Sort by confidence descending
+    sorted_dets = sorted(detections, key=lambda x: x['score'], reverse=True)
+    keep = []
+    
+    for detection in sorted_dets:
+        should_keep = True
+        for kept_det in keep:
+            if calculate_iou(detection['bbox'], kept_det['bbox']) > nms_threshold:
+                should_keep = False
+                break
+        if should_keep:
+            keep.append(detection)
+    
+    return keep
+
+def get_git_version() -> str:
+    """Get git commit SHA for reproducibility"""
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], 
+                                    cwd=Path(__file__).parent, text=True).strip()
+        return f"git:{sha}"
+    except:
+        return "unknown"
 
 def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dict:
     """
@@ -324,10 +382,11 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
     tracking_config = config['tracking']
     
     # Extract thresholds
-    track_thresh = tracking_config['track_thresh']  # 0.60 - HIGH threshold
-    det_thresh = tracking_config['det_thresh']      # 0.40 - LOW threshold  
-    match_thresh = tracking_config['match_thresh']  # 0.60 - IoU threshold
-    min_track_len = tracking_config['min_track_len'] # 3 - minimum track length
+    track_thresh = tracking_config['track_thresh']  # 0.70 - HIGH threshold
+    det_thresh = tracking_config['det_thresh']      # 0.25 - LOW threshold  
+    match_thresh = tracking_config['match_thresh']  # 0.35 - IoU threshold
+    min_track_len = tracking_config['min_track_len'] # 8 - minimum track length
+    nms_threshold = tracking_config['nms_iou']      # 0.85 - NMS threshold
     
     # Calculate track buffer in frames
     track_buffer_s = tracking_config['track_buffer_s']  # 0.8 seconds
@@ -335,7 +394,7 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
     track_buffer_frames = round(track_buffer_s * fps_effective)
     
     print(f"  ByteTrack config: HIGH={track_thresh}, LOW={det_thresh}, "
-          f"match_IoU={match_thresh}, buffer={track_buffer_frames}f")
+          f"match_IoU={match_thresh}, NMS={nms_threshold}, buffer={track_buffer_frames}f")
     
     # Initialize tracking state
     active_tracks = []    # Currently active tracks
@@ -357,9 +416,12 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
                 track.mark_miss()
             continue
         
-        # Split detections into HIGH and LOW confidence
-        high_detections = [d for d in detections if d['score'] >= track_thresh]
-        low_detections = [d for d in detections if det_thresh <= d['score'] < track_thresh]
+        # Apply NMS to remove duplicate detections
+        nms_detections = apply_nms_per_frame(detections, nms_threshold)
+        
+        # Split NMS-filtered detections into HIGH and LOW confidence
+        high_detections = [d for d in nms_detections if d['score'] >= track_thresh]
+        low_detections = [d for d in nms_detections if det_thresh <= d['score'] < track_thresh]
         
         print(f"    Frame {frame_idx}: {len(high_detections)} HIGH, {len(low_detections)} LOW detections")
         
@@ -372,8 +434,8 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
                     predicted_bbox = track.predict_next_bbox()
                     iou_matrix[det_idx, track_idx] = calculate_iou(detection['bbox'], predicted_bbox)
             
-            # Find matches using greedy assignment
-            matches = greedy_assignment(iou_matrix, match_thresh)
+            # Find matches using Hungarian assignment (optimal)
+            matches = hungarian_assignment(iou_matrix, match_thresh)
             
             # Update matched tracks
             matched_det_indices = set()
@@ -431,8 +493,8 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
                     predicted_bbox = track.predict_next_bbox()
                     iou_matrix[det_idx, track_idx] = calculate_iou(detection['bbox'], predicted_bbox)
             
-            # Find recovery matches using greedy assignment
-            matches = greedy_assignment(iou_matrix, match_thresh)
+            # Find recovery matches using Hungarian assignment (optimal)
+            matches = hungarian_assignment(iou_matrix, match_thresh)
             
             # Recover matched tracks
             recovered_track_indices = set()
@@ -493,28 +555,42 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
     # Sort tracks by track_id
     valid_tracks.sort(key=lambda x: x['track_id'])
     
-    # Build final output
+    # Build final output with enhanced metadata
     result = {
-        'video': video_info.get('video_path', 'unknown.mp4'),
+        'schema_version': '1.0',
+        'video': Path(video_info.get('video_path', 'unknown.mp4')).name,
+        'tracking_code_version': get_git_version(),
         'video_info': {
             'fps': video_info['fps'],
             'fps_effective': fps_effective,
             'width': video_info.get('width'),
             'height': video_info.get('height'),
-            'total_frames': video_info.get('total_frames')
+            'total_frames': video_info.get('total_frames'),
+            'frame_size': [video_info.get('width'), video_info.get('height')]
         },
         'tracking_config': {
+            'method': 'bytetrack',
+            'assignment': 'hungarian',
             'track_thresh': track_thresh,
             'det_thresh': det_thresh,
             'match_thresh': match_thresh,
+            'nms_iou': nms_threshold,
+            'track_buffer_s': track_buffer_s,
             'track_buffer_frames': track_buffer_frames,
-            'min_track_len': min_track_len
+            'min_track_len': min_track_len,
+            'frame_stride': config['megadetector']['frame_stride']
         },
         'tracks': valid_tracks,
         'summary': {
             'total_tracks': len(valid_tracks),
             'total_detections': sum(len(track['detections']) for track in valid_tracks),
-            'frames_processed': len(frames)
+            'frames_processed': len(frames),
+            'avg_track_length': round(sum(len(track['detections']) for track in valid_tracks) / max(1, len(valid_tracks)), 1),
+            'validation_status': {
+                'threshold_hierarchy_valid': True,
+                'assignment_method': 'hungarian',
+                'nms_applied': True
+            }
         }
     }
     
@@ -522,10 +598,13 @@ def run_bytetrack(frame_detections: Dict, video_info: Dict, config: Dict) -> Dic
 
 def main():
     """Main processing function"""
+    print("🦁 ByteTrack Wildlife Tracking Pipeline")
+    print("=" * 50)
+    
     args = parse_args()
     config = load_config(args.config)
     
-    # Validate configuration
+    # Enhanced configuration validation
     validate_thresholds(config)
     
     # Resolve paths
@@ -535,18 +614,26 @@ def main():
     
     # Get files to process
     md_files = get_md_json_files(md_json_path)
-    print(f"Found {len(md_files)} MD JSON files to process")
+    print(f"📁 Found {len(md_files)} MD JSON files to process")
+    print(f"📂 Input: {md_json_path}")
+    print(f"📂 Output: {out_json_dir}")
+    print(f"🎬 Videos: {videos_root}")
     
     if not md_files:
-        print("No MD JSON files found!")
+        print("❌ No MD JSON files found!")
+        print("   Make sure MegaDetector has been run first: python scripts/10_run_md_batch.py")
         return
     
     # Create output directory
     out_json_dir.mkdir(parents=True, exist_ok=True)
+    print()
     
-    # Process each file
-    for md_file in md_files:
-        print(f"\n--- Processing {md_file.name} ---")
+    # Process each file with progress tracking
+    processed = 0
+    total_tracks = 0
+    
+    for i, md_file in enumerate(md_files, 1):
+        print(f"🎥 [{i}/{len(md_files)}] Processing {md_file.name}")
         
         try:
             # Load and adapt MD detections
@@ -567,14 +654,27 @@ def main():
             with open(output_file, 'w') as f:
                 json.dump(tracks_data, f, indent=2)
             
-            print(f"  Saved tracking results: {output_file}")
-            print(f"  Created {len(tracks_data['tracks'])} tracks")
+            num_tracks = len(tracks_data['tracks'])
+            total_tracks += num_tracks
+            processed += 1
+            
+            print(f"  ✅ Saved: {output_file}")
+            print(f"  📊 Created {num_tracks} tracks, avg_length={tracks_data['summary']['avg_track_length']}")
             
         except Exception as e:
-            print(f"Error processing {md_file.name}: {str(e)}")
+            print(f"  ❌ Error processing {md_file.name}: {str(e)}")
             continue
     
-    print(f"\nAdapter testing complete! Check {out_json_dir} for outputs")
+    # Final summary
+    print("\n" + "=" * 50)
+    print(f"🎯 ByteTrack Processing Complete!")
+    print(f"   📁 Processed: {processed}/{len(md_files)} videos")
+    print(f"   🏷️  Total tracks: {total_tracks}")
+    print(f"   📂 Output directory: {out_json_dir}")
+    print(f"   🔧 Tracking version: {get_git_version()}")
+    
+    if processed < len(md_files):
+        print(f"   ⚠️  {len(md_files) - processed} files failed - check error messages above")
 
 if __name__ == "__main__":
     main()
