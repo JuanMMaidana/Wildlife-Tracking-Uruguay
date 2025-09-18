@@ -10,6 +10,12 @@ This pipeline processes camera trap videos to detect, track, and classify animal
 2. **Tracking**: ByteTrack groups detections into coherent animal tracks  
 3. **Classification**: Species classifier identifies the animal type (13 Uruguayan species)
 
+## Documentation & Guides
+
+- `guides/README.md`: entry point for implementation progress
+- `guides/GUIDE_BYTRACK.md`: ByteTrack feature branch checklist and tuning notes
+- `guides/GUIDE_CLASSIFICATION.md`: Track → Crop → Classification → Counts roadmap with validation gates
+
 ## Target Species (13 classes)
 - armadillo, bird, capybara, cow, dusky_legged_guan, gray_brocket
 - hare, human, margay, skunk, wild_boar, unknown_animal, no_animal
@@ -29,25 +35,29 @@ Video Files → MegaDetector → ByteTrack → Frame Sampling → Auto-Labeling 
 ## Project Structure
 
 ```
-megadetector-pipeline/
-├── config/              # Configuration files
-│   ├── pipeline.yaml    # Main pipeline settings
-│   └── classes.yaml     # Species definitions
-├── scripts/             # Processing scripts
-│   ├── 00_probe_gpu.py  # System check
-│   ├── 10_run_md_batch.py    # MegaDetector batch processing
-│   ├── 20_track_bytrack.py   # ByteTrack tracking
-│   ├── 30_select_frames.py   # Frame sampling (TODO)
-│   └── 40_autolabel_from_filename.py  # Auto-labeling (TODO)
-├── data/                # Data directories (gitignored)
-│   ├── videos_raw/      # Original video files
-│   ├── md_json/         # MegaDetector outputs
-│   ├── tracks_json/     # Tracking results
-│   ├── candidates/      # Extracted frame crops
-│   └── datasets/        # Final training datasets
-└── models/              # Model weights (gitignored)
-    ├── detectors/       # MegaDetector weights
-    └── classifiers/     # Species classifier weights
+wildlife-tracking-uruguay/
+├── config/                  # Configuration files
+│   ├── pipeline.yaml        # Main pipeline settings
+│   └── classes.yaml         # Species definitions (13 classes)
+├── guides/                  # Step-by-step implementation guides
+│   ├── GUIDE_BYTRACK.md     # ByteTrack feature branch
+│   └── GUIDE_CLASSIFICATION.md
+├── scripts/                 # Processing scripts
+│   ├── 00_probe_gpu.py      # System check
+│   ├── 10_run_md_batch.py   # MegaDetector batch processing
+│   ├── 20_run_tracking.py   # ByteTrack production runner (Hungarian + tuned thresholds)
+│   ├── 20_track_bytrack.py  # Legacy prototype (kept for reference)
+│   └── md_scripts/          # MegaDetector helpers & sweeps
+├── data/                    # Data directories (gitignored)
+│   ├── videos_raw/          # Original video files
+│   ├── md_json/             # MegaDetector outputs
+│   ├── tracking_json/       # ByteTrack outputs
+│   ├── crops/               # Auto-labeled crops (planned)
+│   └── datasets/            # Training datasets (planned)
+├── experiments/             # Calibration + validation studies
+└── models/                  # Model weights (gitignored)
+    ├── detectors/           # MegaDetector weights
+    └── classifier/          # Species classifier checkpoints (planned)
 ```
 
 ## Quick Start
@@ -96,13 +106,13 @@ python scripts/00_probe_gpu.py
 python scripts/10_run_md_batch.py
 
 # Step 2: Generate tracks from detections  
-python scripts/20_track_bytrack.py
+python scripts/20_run_tracking.py
 
-# Step 3: Extract and sample frames (TODO - needs implementation)
-python scripts/30_select_frames.py
+# Step 3: Auto-label crops (planned)
+# python scripts/31_autolabel_from_filenames.py --config config/pipeline.yaml ...
 
-# Step 4: Auto-label from filenames (TODO - needs implementation)
-python scripts/40_autolabel_from_filename.py
+# Step 4: Train species classifier (planned)
+# python training/train_classifier.py --config config/pipeline.yaml ...
 ```
 
 ## Configuration
@@ -117,24 +127,27 @@ Edit `config/pipeline.yaml` to adjust:
 
 ✅ **Completed:**
 - Project structure and configuration
-- MegaDetector batch processing (10_run_md_batch.py)
-- ByteTrack integration framework (20_track_bytrack.py)
+- MegaDetector batch processing (`scripts/10_run_md_batch.py`)
+- ByteTrack production runner with Hungarian assignment (`scripts/20_run_tracking.py`)
 
-🚧 **TODO (Needs Human Input):**
-- Complete tracking algorithm in `20_track_bytrack.py` (IoU-based matching)
-- Frame sampling and crop extraction (30_select_frames.py)
-- Auto-labeling with guardrails (40_autolabel_from_filename.py)
-- CVAT integration scripts
-- Species classifier training
+🚧 **In Progress:**
+- Tracking visualization + regression testing (`guides/GUIDE_BYTRACK.md` Steps 9-10)
+- Classification pipeline design & validation (`guides/GUIDE_CLASSIFICATION.md` Phase 1)
+
+🛠️ **Planned:**
+- Auto-label crops from filename metadata (`scripts/31_autolabel_from_filenames.py`)
+- Classifier training/evaluation scripts (`training/`)
+- Counts by species analytics (`scripts/40_counts_by_species.py`)
+- CVAT integration and manual review workflows
 
 ## Contributing
 
 This is an active research project. Key areas needing development:
 
-1. **Tracking Algorithm**: Complete the IoU-based tracking in `20_track_bytrack.py`
-2. **Frame Sampling**: Implement diverse frame selection strategies
-3. **Auto-labeling**: Build robust filename-based labeling with quality controls
-4. **Species Classification**: Train and integrate species classifier
+1. **Tracking QA**: Finish visualization + regression tests for ByteTrack outputs
+2. **Autolabeling**: Build filename-based crop extraction with manual validation loop
+3. **Classification**: Implement training/evaluation scripts and manage class balance
+4. **Analytics & Docs**: Aggregate per-species counts, polish documentation, and integrate CVAT workflows
 
 ## Hardware Requirements
 
@@ -151,6 +164,12 @@ The auto-labeling strategy is particularly useful for camera trap scenarios wher
 - Filenames contain species metadata  
 - Manual annotation is time-consuming
 - Quality control is critical
+
+### Dataset Strategy
+
+- **Tuning pool:** ~20 hand-curated videos processed on a Windows GPU workstation used to calibrate MegaDetector, ByteTrack, and upcoming classification steps
+- **Scale-up plan:** once the full pipeline is validated, run a larger corpus with consistent species stems in filenames (e.g., `margay001.mp4`, `capybara002.mp4`) curated manually
+- **Tracking:** keep tuning vs. production metrics separate to monitor generalization when the dataset expands
 
 ## License
 
