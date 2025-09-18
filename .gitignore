@@ -79,6 +79,9 @@ logs/
 !docs/plots/
 !docs/plots/**/*.png
 
+# Allow shared script helpers
+!/scripts/lib/
+
 # OS generated files
 .DS_Store
 .DS_Store?

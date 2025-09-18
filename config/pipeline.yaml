@@ -8,6 +8,8 @@ paths:
   tracks_json: "data/tracking_json"  # ByteTrack outputs (consistent naming)
   candidates: "data/candidates"
   autolabels: "data/autolabels"
+  crops: "data/crops"
+  crops_manifest: "data/crops_manifest.csv"
   cvat_exports: "data/cvat_exports"
   datasets: "data/datasets/species_cls"
   reports: "data/reports"
@@ -83,8 +85,19 @@ autolabel:
     - "margay:ocelote"          # confusable pairs
     - "gray_brocket:deer"
   
-  # Quality control
+# Quality control
   spot_check_ratio: 0.1         # randomly review 10% of auto-labels
+
+# Classification pipeline settings
+classification:
+  species_map: "config/species_map.yaml"
+  crop_padding: 0.05            # padding applied around bbox before cropping
+  neighbors: 2                  # frames to include on each side of representative frame
+  min_track_len: 6              # minimum track length to consider for crops
+  max_crops_per_track: 5        # limit crops per track to avoid imbalance
+  skip_classes: ["no_animal", "unknown_animal"]
+  split_strategy: "by_video"    # dataset split granularity
+  random_seed: 42               # reproducibility for splitting
 
 # Dataset splitting strategy
 split:

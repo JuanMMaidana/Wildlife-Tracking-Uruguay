@@ -7,14 +7,15 @@
 ## Phase 1: Validation & QA
 
 ### ✅ Step 0: Planning & Alignment
-- Created feature branch `feat/classification-pipeline`
-- Documented scope in this guide to mirror ByteTrack workflow
-- Confirmed inputs (`data/tracking_json/*.json`) and tuned thresholds from tracking stage
-- Defined experiment IDs and output locations to avoid collisions with existing runs
-- Working dataset: ~20 hand-curated videos (Windows GPU box) used for all hyperparameter tuning to date
-- Expansion plan: once pipeline is validated, run larger renamed corpus (e.g., `margay001.mp4`, `capybara002.mp4`) with consistent species stems maintained manually
+- ✅ Created feature branch `feat/classification-pipeline`
+- ✅ Documented scope in this guide to mirror ByteTrack workflow
+- ✅ Confirmed inputs (`data/tracking_json/*.json`) and tuned thresholds from tracking stage
+- ✅ Defined experiment IDs and output locations to avoid collisions with existing runs
+- ✅ Working dataset: ~20 hand-curated videos (Windows GPU box) used for all hyperparameter tuning to date
+- ✅ Expansion plan: once pipeline is validated, run larger renamed corpus (e.g., `margay001.mp4`, `capybara002.mp4`) with consistent species stems maintained manually
+- ✅ Reorganized documentation into `guides/` directory with cross-linked README
 
-### ⏳ Step 1: Species Mapping Configuration
+### ✅ Step 1: Species Mapping Configuration
 - Add `config/species_map.yaml` mapping filename regex patterns to 13 classes
 - Enforce first-match-wins, error on multiple matches, fallback to `unknown_animal`
 - Extend `config/pipeline.yaml` with classification section (paths, regex validation toggles)
@@ -30,7 +31,7 @@ patterns:
   no_animal: [".*empty.*", ".*noanimal.*"]
 ```
 
-### ⏳ Step 2: Autolabel From Filenames (`scripts/31_autolabel_from_filenames.py`)
+### ✅ Step 2: Autolabel From Filenames (`scripts/31_autolabel_from_filenames.py`)
 - CLI args per spec (`--config`, `--species-map`, `--tracks-json`, `--video-root`, `--out-dir`, ...)
 - For each track: infer species via regex → skip `no_animal`/`unknown_animal`
 - Select representative frame ± `neighbors`, convert bbox→pixels, apply padding + clipping
@@ -38,12 +39,14 @@ patterns:
 - Append manifest rows to `data/crops_manifest.csv` with full metadata (video, track_id, frame, bbox, species, conf, dwell stats)
 - Guardrails: error on conflicting matches, skip short tracks, log skipped cases, preserve deterministic ordering
 - **Notation:** script numbering aligns with new classification stage; update README when rolling out
+- ✅ Script in place; parameter tuning (`neighbors`, `min_track_len`, `max_crops_per_track`, `crop_padding`) deferred until manual validation session on Windows workstation
 
 ### ⏳ Step 3: Manual Validation Loop
 - Generate crops for 15–20 representative videos using Step 2 output
 - Perform human review (on Windows GPU box) to confirm species mapping and crop quality
 - Check dwell-time metadata vs. raw video timestamps
 - Log issues in `experiments/exp_003_autolabel/validation_notes.md`
+- Evaluate and, if needed, retune sampling parameters (`neighbors`, `min_track_len`, `max_crops_per_track`, `crop_padding`) based on observed behavior
 - Iterate on regex patterns, padding, min track length until ≥95% manual spot-check accuracy
 - Gate: do not advance to Phase 2 until manual validation passes and issues are resolved
 
@@ -160,9 +163,9 @@ experiments/
 - [ ] CI smoke tests pass locally and on GitHub Actions
 
 ## Commits Log
-- [x] Step 0: Planning scaffold (`feat/classification-pipeline` created, guide added)
-- [ ] Step 1: Add species map config + loader tests
-- [ ] Step 2: Implement `31_autolabel_from_filenames.py`
+- [x] Step 0: Planning scaffold (`feat/classification-pipeline` created, guide added) - 4baa9ce
+- [x] Step 1: Add species map config + loader tests
+- [x] Step 2: Implement `31_autolabel_from_filenames.py`
 - [ ] Step 3: Manual validation notes + fixes (`exp_003_autolabel/validation_notes.md`)
 - [ ] Step 4: Autolabel QA summaries (`exp_003_autolabel` artifacts)
 - [ ] Step 5: Training/eval scripts under `training/`

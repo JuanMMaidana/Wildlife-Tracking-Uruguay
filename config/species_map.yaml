@@ -1,0 +1,43 @@
+# Regex-based mapping from video filename stems to species classes
+# First match wins; patterns evaluated top-to-bottom
+
+patterns:
+  margay:
+    - '(?i)^margay'
+    - '(?i)felis[_-]?wiedii'
+  capybara:
+    - '(?i)^capybara'
+    - '(?i)hydrochoerus'
+  gray_brocket:
+    - '(?i)(gray|grey)[_-]?brocket'
+    - '(?i)mazama'
+  dusky_legged_guan:
+    - '(?i)dusky[-_ ]?legged[-_ ]?guan'
+    - '(?i)penelope'
+  armadillo:
+    - '(?i)^armadillo'
+    - '(?i)dasypus'
+  skunk:
+    - '(?i)^skunk'
+    - '(?i)cone[jo]?zorra'
+  wild_boar:
+    - '(?i)wild[-_ ]?boar'
+    - '(?i)(javali|jabal[ií])'
+  hare:
+    - '(?i)^hare'
+    - '(?i)lepus'
+  bird:
+    - '(?i)^bird'
+    - '(?i)aves?'
+  cow:
+    - '(?i)^cow'
+    - '(?i)bovino'
+  human:
+    - '(?i)human'
+    - '(?i)person'
+  unknown_animal:
+    - '(?i)unknown'
+    - '(?i)unidentified'
+  no_animal:
+    - '(?i)no[_-]?animal'
+    - '(?i)empty'
