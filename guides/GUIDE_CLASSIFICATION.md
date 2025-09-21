@@ -56,6 +56,7 @@ patterns:
 - Produce `report.md` with per-species sample grid references (placeholder for local images)
 - Add automated checks (blur score distribution, bbox area histograms, class coverage)
 - Update README with link to summary artifacts once stable
+- ✅ `summary.py` script + unit tests scaffold these outputs (awaiting real manifest input)
 
 ## Phase 2: Training & Production
 
@@ -65,6 +66,7 @@ patterns:
 - `training/eval_classifier.py`: top-1 accuracy, per-class F1, confusion matrix export (`experiments/exp_003_species/metrics.json|csv`)
 - Record training/eval configs in `experiments/exp_003_species/params.yaml`
 - Add dependency notes (torchvision extras, albumentations/torchmetrics if used) to environment docs
+- ✅ CLI skeletons committed for split prep + training/eval; plug data loaders + torch training loop once crops available
 
 ### ⏳ Step 6: Counts by Species (`scripts/40_counts_by_species.py`)
 - Load classifier predictions per track (majority vote or rep-frame)

@@ -11,6 +11,7 @@ patterns:
   gray_brocket:
     - '(?i)(gray|grey)[_-]?brocket'
     - '(?i)mazama'
+    - '(?i)guazubira'
   dusky_legged_guan:
     - '(?i)dusky[-_ ]?legged[-_ ]?guan'
     - '(?i)penelope'
@@ -23,6 +24,7 @@ patterns:
   wild_boar:
     - '(?i)wild[-_ ]?boar'
     - '(?i)(javali|jabal[ií])'
+    - '(?i)wild[-_ ]?boad'
   hare:
     - '(?i)^hare'
     - '(?i)lepus'
