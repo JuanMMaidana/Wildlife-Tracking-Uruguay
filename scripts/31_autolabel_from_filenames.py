@@ -32,7 +32,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from scripts.lib.species_map import SpeciesMap, SpeciesMapError, load_species_map
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from lib.species_map import SpeciesMap, SpeciesMapError, load_species_map
 
 
 MANIFEST_COLUMNS = [
@@ -63,6 +66,7 @@ class AutolabelConfig:
     min_track_len: int
     max_crops_per_track: int
     skip_classes: Sequence[str]
+    species_crop_targets: Dict[str, int]
 
 
 @dataclass
@@ -112,12 +116,16 @@ def resolve_config(args: argparse.Namespace) -> Tuple[Path, Path, Path, Path, Au
     if args.skip_classes:
         skip_classes = args.skip_classes
 
+    # Load species-specific crop targets
+    species_crop_targets = classific_cfg.get("species_crop_targets", {})
+
     autolabel_cfg = AutolabelConfig(
         crop_padding=float(args.crop_padding if args.crop_padding is not None else classific_cfg.get("crop_padding", 0.05)),
         neighbors=int(args.neighbors if args.neighbors is not None else classific_cfg.get("neighbors", 2)),
         min_track_len=int(args.min_track_len if args.min_track_len is not None else classific_cfg.get("min_track_len", 6)),
-        max_crops_per_track=int(args.max_crops_per_track if args.max_crops_per_track is not None else classific_cfg.get("max_crops_per_track", 5)),
+        max_crops_per_track=int(args.max_crops_per_track if args.max_crops_per_track is not None else classific_cfg.get("max_crops_per_track", 8)),
         skip_classes=skip_classes,
+        species_crop_targets=species_crop_targets,
     )
 
     return species_map_path, tracks_path, video_root, manifest_path, autolabel_cfg, crops_dir
@@ -183,34 +191,74 @@ def collect_detections(track: Dict) -> Dict[int, TrackDetection]:
     return mapping
 
 
-def select_frames(track: Dict, detections: Dict[int, TrackDetection], neighbors: int) -> List[int]:
+def select_frames_hybrid(track: Dict, detections: Dict[int, TrackDetection], neighbors: int, target_crops: int, species: str) -> List[int]:
     """
-    Frame Selection: Pick best frames around representative frame
-    
-    Example with neighbors=2:
-    - rep_frame = 150 (highest confidence detection from ByteTrack)
-    - neighbors = 2
-    - Candidates: [148, 149, 150, 151, 152]
-    - Result: [148, 149, 150, 151, 152] (only if those frames have detections)
+    Hybrid Frame Selection: Quality anchor + temporal distribution
+
+    Strategy:
+    1. Always include best frames around rep_frame (quality guarantee)
+    2. Distribute additional samples across full track timeline (temporal diversity)
+    3. Ensure no duplicate frames
+
+    Example for margay (target_crops=12):
+    Track frames: [10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38]  # 15 total
+    Step 1 - Quality anchor (neighbors=2): [16, 18, 20] around rep_frame=18
+    Step 2 - Distributed sampling: [10, 24, 28, 34, 38] from remaining timeline
+    Step 3 - High confidence boost: [14, 22, 26, 32] from high-confidence frames
+    Result: 12 unique frames spanning full temporal range
     """
-    frames = set()
-    rep_frame = track.get("rep_frame")  # Best frame chosen by ByteTrack
+    available_frames = list(detections.keys())
+    if len(available_frames) <= target_crops:
+        return sorted(available_frames)  # Use all available if track is short
+
+    selected_frames = set()
+
+    # Step 1: Quality anchor - frames around representative frame
+    rep_frame = track.get("rep_frame")
     if rep_frame is None and detections:
-        # Fallback: find highest confidence detection manually
         rep_frame = max(detections.values(), key=lambda d: d.confidence).frame
-    if rep_frame is None:
-        return []
-    
-    frames.add(rep_frame)  # Always include the best frame
-    
-    # Add neighboring frames (±1, ±2, etc.) if they have detections
-    for offset in range(1, neighbors + 1):
-        for candidate in (rep_frame - offset, rep_frame + offset):
-            if candidate in detections:  # Only if frame has actual detection
-                frames.add(candidate)
-    
-    ordered = sorted(frames)
-    return ordered
+
+    if rep_frame is not None:
+        selected_frames.add(rep_frame)
+        # Add neighbors around rep_frame for quality
+        for offset in range(1, neighbors + 1):
+            for candidate in (rep_frame - offset, rep_frame + offset):
+                if candidate in detections and len(selected_frames) < target_crops:
+                    selected_frames.add(candidate)
+
+    # Step 2: Distributed sampling across timeline
+    remaining_frames = [f for f in available_frames if f not in selected_frames]
+    if remaining_frames and len(selected_frames) < target_crops:
+        need_more = target_crops - len(selected_frames)
+
+        # Sort by frame number for temporal distribution
+        remaining_frames.sort()
+
+        # Take evenly spaced frames across timeline
+        if len(remaining_frames) >= need_more:
+            step = len(remaining_frames) / need_more
+            for i in range(need_more):
+                idx = int(i * step)
+                if idx < len(remaining_frames):
+                    selected_frames.add(remaining_frames[idx])
+        else:
+            # Use all remaining frames
+            selected_frames.update(remaining_frames)
+
+    # Step 3: If still need more, prioritize high-confidence detections
+    if len(selected_frames) < target_crops:
+        remaining_by_conf = [f for f in available_frames if f not in selected_frames]
+        remaining_by_conf.sort(key=lambda f: detections[f].confidence, reverse=True)
+
+        need_more = target_crops - len(selected_frames)
+        for frame in remaining_by_conf[:need_more]:
+            selected_frames.add(frame)
+
+    return sorted(list(selected_frames))
+
+def select_frames(track: Dict, detections: Dict[int, TrackDetection], neighbors: int) -> List[int]:
+    """Legacy wrapper for backward compatibility"""
+    return select_frames_hybrid(track, detections, neighbors, 5, "default")
 
 
 def apply_padding(
@@ -392,7 +440,12 @@ def process_tracking_file(
                 continue
 
             detections = collect_detections(track)
-            frames = select_frames(track, detections, autolabel_cfg.neighbors)
+
+            # Get species-specific crop target
+            target_crops = autolabel_cfg.species_crop_targets.get(species, autolabel_cfg.max_crops_per_track)
+
+            # Use hybrid frame selection with species-specific targets
+            frames = select_frames_hybrid(track, detections, autolabel_cfg.neighbors, target_crops, species)
             if not frames:
                 stats["tracks_no_frames"] += 1
                 continue
@@ -411,7 +464,7 @@ def process_tracking_file(
                 frame_width,
                 frame_height,
                 dwell_seconds,
-                autolabel_cfg.max_crops_per_track,
+                target_crops,
             )
             if not rows:
                 stats["tracks_no_crops"] += 1
@@ -448,9 +501,23 @@ def main() -> int:
     except SpeciesMapError as exc:
         raise SystemExit(f"Species map validation error: {exc}")
 
-    tracking_files = list_tracking_files(tracks_path)
-    if not tracking_files:
+    all_tracking_files = list_tracking_files(tracks_path)
+    if not all_tracking_files:
         print(f"No tracking files found in {tracks_path}")
+        return 1
+
+    # Filter tracking files to only those with corresponding videos in video_root
+    tracking_files = []
+    for tracking_file in all_tracking_files:
+        video_stem = tracking_file.stem
+        video_path = video_root / f"{video_stem}.mp4"
+        if video_path.exists():
+            tracking_files.append(tracking_file)
+        else:
+            print(f"⚠️  Skipping {tracking_file.name} - no video found at {video_path}")
+
+    if not tracking_files:
+        print(f"No tracking files have corresponding videos in {video_root}")
         return 1
 
     print("🦊 Autolabel from filenames")
@@ -459,7 +526,8 @@ def main() -> int:
     print(f"Videos root: {video_root}")
     print(f"Crops output: {crops_dir}")
     print(f"Manifest: {manifest_path}")
-    print(f"Config → padding={autolabel_cfg.crop_padding}, neighbors={autolabel_cfg.neighbors}, min_track_len={autolabel_cfg.min_track_len}, max_crops={autolabel_cfg.max_crops_per_track}")
+    print(f"Config → padding={autolabel_cfg.crop_padding}, neighbors={autolabel_cfg.neighbors}, min_track_len={autolabel_cfg.min_track_len}, base_max_crops={autolabel_cfg.max_crops_per_track}")
+    print(f"Species targets → {dict(autolabel_cfg.species_crop_targets)}")
 
     aggregate = defaultdict(int)
 

@@ -2,7 +2,7 @@
 # Main configuration file for the camera trap animal detection and classification pipeline
 
 paths:
-  videos_raw: "data/test_md_vids"
+  videos_raw: "data/dataset-v1"
   videos_work: "data/videos_work"  # optional: for re-encoded videos
   md_json: "data/md_json"
   tracks_json: "data/tracking_json"  # ByteTrack outputs (consistent naming)
@@ -92,12 +92,26 @@ autolabel:
 classification:
   species_map: "config/species_map.yaml"
   crop_padding: 0.05            # padding applied around bbox before cropping
-  neighbors: 2                  # frames to include on each side of representative frame
+  neighbors: 2                  # base frames around representative frame (quality anchor)
   min_track_len: 6              # minimum track length to consider for crops
-  max_crops_per_track: 5        # limit crops per track to avoid imbalance
+  max_crops_per_track: 8        # base limit for common species
   skip_classes: ["no_animal", "unknown_animal"]
   split_strategy: "by_video"    # dataset split granularity
   random_seed: 42               # reproducibility for splitting
+
+  # NEW: Species-specific crop targets (hybrid sampling)
+  species_crop_targets:         # target crops per track for each species
+    margay: 12                  # 6 tracks × 12 = 72 crops (was 18)
+    gray_brocket: 8             # 8 tracks × 8 = 64 crops (was 24)
+    hare: 8                     # 8 tracks × 8 = 64 crops (was 24)
+    skunk: 8                    # 8 tracks × 8 = 64 crops (was 24)
+    bird: 6                     # 11 tracks × 6 = 66 crops (was 32)
+    capybara: 6                 # 13 tracks × 6 = 78 crops (was 38)
+    armadillo: 8                # 9 tracks × 8 = 72 crops (was 54)
+    wild_boar: 6                # 15 tracks × 6 = 90 crops (was 45)
+    human: 6                    # 19 tracks × 6 = 114 crops (was 53)
+    cow: 4                      # 30 tracks × 4 = 120 crops (was 80)
+    dusky_legged_guan: 4        # 27 tracks × 4 = 108 crops (was 80)
 
 # Dataset splitting strategy
 split:
