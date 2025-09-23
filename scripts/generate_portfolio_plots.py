@@ -155,7 +155,11 @@ def build_crop_grid(preds: pd.DataFrame, out_path: Path, rows: int, cols: int, s
 
     for idx, record in enumerate(samples):
         crop_rel = record.get("crop_path", "")
-        crop_path = (ROOT / Path(crop_rel.replace("\\", "/"))).resolve()
+        # Handle both 'crops/...' and 'data/crops/...' formats
+        if crop_rel.startswith("crops/"):
+            crop_path = (ROOT / "data" / Path(crop_rel.replace("\\", "/"))).resolve()
+        else:
+            crop_path = (ROOT / Path(crop_rel.replace("\\", "/"))).resolve()
         if not crop_path.exists():
             continue
         img = Image.open(crop_path).convert("RGB")
