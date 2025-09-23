@@ -70,11 +70,11 @@ patterns:
 - ✅ Implemented and tested both strategies; crop-level selected for optimal training stability
 
 ### ⏳ Step 6: Classifier Training Scripts (`training/`)
-- `training/train_classifier.py`: baseline torchvision ResNet50 & MobileNetV3, augmentations, checkpointing to `models/classifier/`
-- `training/eval_classifier.py`: top-1 accuracy, per-class F1, confusion matrix export (`experiments/exp_003_species/metrics.json|csv`)
-- Record training/eval configs in `experiments/exp_003_species/params.yaml`
-- Add dependency notes (torchvision extras, albumentations/torchmetrics if used) to environment docs
-- ✅ CLI skeletons committed for split prep + training/eval; plug data loaders + torch training loop once crops available
+- ✅ `training/train_classifier.py`: full data pipeline (manifest parsing, crop/ video split support, torchvision transforms) and baseline training loop (ResNet50/MobileNetV3, AdamW, cosine LR, class balancing, metrics logging, best-checkpoint saving)
+- ⏳ `training/eval_classifier.py`: still needs model loading + metric export (top-1, per-class F1, confusion matrix)
+- ⏳ Record training/eval configs in `experiments/exp_003_species/params.yaml`
+- 🔄 Add dependency notes (torchvision extras, torchmetrics if used) to README/environment docs
+- Output artefacts: `experiments/exp_003_species/metrics.csv`, `metrics.json`, `best_model.pt`
 
 ### ⏳ Step 7: Counts by Species (`scripts/40_counts_by_species.py`)
 - Load classifier predictions per track (majority vote or rep-frame)
@@ -146,10 +146,18 @@ classification:
   crop_padding: 0.05
   neighbors: 2
   min_track_len: 6
-  max_crops_per_track: 5
+  max_crops_per_track: 8
   skip_classes: ["no_animal", "unknown_animal"]
   split_strategy: "by_video"
   random_seed: 42
+  model: "resnet50"
+  epochs: 15
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  image_size: 224
+  balance_classes: true
+  log_interval: 50
+  dataloader_workers: 4
 ```
 
 ## Directory Structure (New & Updated)
