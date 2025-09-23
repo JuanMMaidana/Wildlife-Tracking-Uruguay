@@ -1,187 +1,99 @@
-# MegaDetector Pipeline for Camera Trap Analysis
+# Wildlife Tracking & Species Classification Pipeline
 
-A computer vision pipeline for Uruguayan fauna recognition in camera trap videos using MegaDetector, ByteTrack, and species classification.
+End-to-end system for Uruguayan camera traps: detect animals with MegaDetector, track them with ByteTrack, auto-label crops, train a species classifier, and produce per-video species counts. Built to scale from a 20-video tuning pool to larger deployments with reproducible experiments.
 
-## Overview
+## Highlights
+- **Three-stage vision stack**: MegaDetector (YOLOv5) → ByteTrack (Hungarian assignment) → Torch-based classifier
+- **Hybrid auto-labeling**: filename regex + calibrated frame sampling yields 900+ high-quality crops across 11 species
+- **Balanced training**: crop-level dataset splits (634 train / 139 val / 139 test) with class-weighted sampling
+- **Reproducible outputs**: metrics, predictions, counts, and portfolio-ready visuals saved under `experiments/` & `docs/plots/`
 
-This pipeline processes camera trap videos to detect, track, and classify animals using a three-stage approach:
+## Latest Results
+- **Model**: ResNet50 (ImageNet init), 15 epochs, AdamW, cosine LR
+- **Test accuracy**: **95.7%** | **Macro F1**: **95.3%**
+- **Per-class F1**:
+  - armadillo 0.84, bird 0.95, capybara 0.92, cow 1.00, dusky_legged_guan 0.94, gray_brocket 1.00, hare 0.95, human 0.97, margay 0.96, skunk 0.95, wild_boar 1.00
+- Detailed metrics: `experiments/exp_003_species/metrics.json` | Predictions: `experiments/exp_003_species/predictions_test.csv`
 
-1. **Detection**: MegaDetector identifies animals in video frames
-2. **Tracking**: ByteTrack groups detections into coherent animal tracks  
-3. **Classification**: Species classifier identifies the animal type (13 Uruguayan species)
+## Visual Gallery (docs/plots)
+- `confusion_matrix.png` – Test split confusion heatmap
+- `species_counts.png` – Aggregated track counts per species
+- `crop_grid.png` – Sample of labelled crops across species
 
-## Documentation & Guides
-
-- `guides/README.md`: entry point for implementation progress
-- `guides/GUIDE_BYTRACK.md`: ByteTrack feature branch checklist and tuning notes
-- `guides/GUIDE_CLASSIFICATION.md`: Track → Crop → Classification → Counts roadmap with validation gates
-
-## Target Species (13 classes)
-- armadillo, bird, capybara, cow, dusky_legged_guan, gray_brocket
-- hare, human, margay, skunk, wild_boar, unknown_animal, no_animal
-
-## Pipeline Architecture
-
+## Pipeline Overview
 ```
-Video Files → MegaDetector → ByteTrack → Frame Sampling → Auto-Labeling → CVAT → Species Classifier
+Videos → scripts/10_run_md_batch.py → scripts/20_run_tracking.py →
+        scripts/31_autolabel_from_filenames.py → training/train_classifier.py →
+        training/eval_classifier.py → scripts/40_counts_by_species.py
 ```
 
-### Key Features
-- **Auto-labeling with guardrails**: Uses filename metadata for weak supervision
-- **Smart sampling**: Extracts diverse, high-quality crops from each track
-- **CVAT integration**: Manual annotation workflow for quality control
-- **Balanced dataset creation**: Tools for managing class distribution
-
-## Project Structure
-
-```
-wildlife-tracking-uruguay/
-├── config/                  # Configuration files
-│   ├── pipeline.yaml        # Main pipeline settings
-│   └── classes.yaml         # Species definitions (13 classes)
-├── guides/                  # Step-by-step implementation guides
-│   ├── GUIDE_BYTRACK.md     # ByteTrack feature branch
-│   └── GUIDE_CLASSIFICATION.md
-├── scripts/                 # Processing scripts
-│   ├── 00_probe_gpu.py      # System check
-│   ├── 10_run_md_batch.py   # MegaDetector batch processing
-│   ├── 20_run_tracking.py   # ByteTrack production runner (Hungarian + tuned thresholds)
-│   ├── 20_track_bytrack.py  # Legacy prototype (kept for reference)
-│   └── md_scripts/          # MegaDetector helpers & sweeps
-├── data/                    # Data directories (gitignored)
-│   ├── videos_raw/          # Original video files
-│   ├── md_json/             # MegaDetector outputs
-│   ├── tracking_json/       # ByteTrack outputs
-│   ├── crops/               # Auto-labeled crops (planned)
-│   └── datasets/            # Training datasets (planned)
-├── experiments/             # Calibration + validation studies
-└── models/                  # Model weights (gitignored)
-    ├── detectors/           # MegaDetector weights
-    └── classifier/          # Species classifier checkpoints (planned)
-```
+1. **Detection** – MegaDetector (YOLOv5) with tuned thresholds exports `data/md_json/`
+2. **Tracking** – ByteTrack runner (`scripts/20_run_tracking.py`) produces `data/tracking_json/`
+3. **Auto-labeling** – Hybrid frame sampler + regex species map saves crops to `data/crops/` and manifest `data/crops_manifest.csv`
+4. **Dataset QA** – `experiments/exp_003_autolabel/summary.py` + validation notes, balanced crop-level splits (`splits.json/csv`)
+5. **Training** – `training/train_classifier.py` builds Torch datasets/dataloaders, logs metrics/checkpoints to `experiments/exp_003_species/`
+6. **Evaluation** – `training/eval_classifier.py --split test` exports metrics + per-crop predictions
+7. **Counts** – `scripts/40_counts_by_species.py` aggregates predicted species per video (`experiments/exp_004_counts/`)
 
 ## Quick Start
-
-### 1. Environment Setup
-
 ```bash
-# Create conda environment
+# 0. Environment (conda recommended)
 conda env create -f environment.yml
 conda activate megadetector-pipeline
 
-# Or use existing environment with required packages
-conda activate md  # Your existing environment
+# 1. Detection
+python scripts/10_run_md_batch.py --config config/pipeline.yaml --video-dir data/videos_raw
+
+# 2. Tracking
+python scripts/20_run_tracking.py --config config/pipeline.yaml --md-json data/md_json --video-root data/videos_raw
+
+# 3. Auto-label crops
+python scripts/31_autolabel_from_filenames.py --config config/pipeline.yaml --tracks-json data/tracking_json --video-root data/dataset-v1 --out-dir data/crops --manifest data/crops_manifest.csv
+
+# 4. Prepare splits (crop-level balanced)
+python training/prepare_split.py --config config/pipeline.yaml --manifest data/crops_manifest.csv --out-dir experiments/exp_003_autolabel --strategy crop
+
+# 5. Train classifier (GPU recommended)
+python training/train_classifier.py --config config/pipeline.yaml --manifest data/crops_manifest.csv --splits experiments/exp_003_autolabel/splits.json --output-dir experiments/exp_003_species --model resnet50
+
+# 6. Evaluate best checkpoint
+python training/eval_classifier.py --config config/pipeline.yaml --manifest data/crops_manifest.csv --splits experiments/exp_003_autolabel/splits.json --checkpoint experiments/exp_003_species/best_model.pt --output-dir experiments/exp_003_species --split test
+
+# 7. Aggregate counts per video
+python scripts/40_counts_by_species.py --manifest data/crops_manifest.csv --predictions experiments/exp_003_species/predictions_test.csv --out-dir experiments/exp_004_counts
 ```
 
-### 2. Download MegaDetector Weights
-
-```bash
-# Create models directory
-mkdir -p models/detectors
-
-# Download MegaDetector v5a weights
-# From: https://github.com/microsoft/CameraTraps/releases
-# Save as: models/detectors/md_v5a.0.0.pt
+## Repository Map
+```
+wildlife-tracking-uruguay/
+├── config/                    # YAML configs (pipeline thresholds, training hyperparams)
+├── scripts/                   # Stage-wise pipeline scripts + plotting utilities
+│   ├── 10_run_md_batch.py
+│   ├── 20_run_tracking.py
+│   ├── 31_autolabel_from_filenames.py
+│   ├── 40_counts_by_species.py
+│   └── generate_portfolio_plots.py
+├── training/                  # PyTorch training/eval utilities
+│   ├── data_utils.py
+│   ├── train_classifier.py
+│   └── eval_classifier.py
+├── experiments/               # Logged artefacts (calibration, splits, metrics, counts)
+├── docs/plots/                # Portfolio visuals (PNG)
+├── guides/                    # Detailed implementation journals
+└── tests/                     # Lightweight regression tests for configs/splits/counts
 ```
 
-### 3. Prepare Videos
+## Datasets & Experiments
+- **Video inventory:** `experiments/exp_003_autolabel/video_inventory.md` (89 labelled clips across 11 species)
+- **Autolabel QA:** `summary.csv`, `report.md`, `validation_notes.md`
+- **Training metrics:** `experiments/exp_003_species/metrics.{csv,json}`, `best_model.pt` (tracked with Git LFS)
+- **Counts analytics:** `experiments/exp_004_counts/results.csv`
 
-```bash
-# Copy your video files to data/videos_raw/
-# Recommended naming: species_001.mp4, species_002.mp4, etc.
-mkdir -p data/videos_raw
-# cp your_videos/*.mp4 data/videos_raw/
-```
+## CI & Packaging (next improvements)
+- **CI idea:** add a GitHub Actions workflow to run `python -m unittest tests/...` and lint scripts on PRs
+- **Packaging:** extend `environment.yml` with runtime deps (torch, torchvision, pillow, pandas/matplotlib if used) and include CLI usage examples so others can reproduce the pipeline easily
 
-### 4. System Check
-
-```bash
-python scripts/00_probe_gpu.py
-```
-
-### 5. Run Pipeline
-
-```bash
-# Step 1: Run MegaDetector on all videos
-python scripts/10_run_md_batch.py
-
-# Step 2: Generate tracks from detections  
-python scripts/20_run_tracking.py
-
-# Step 3: Auto-label crops (planned)
-# python scripts/31_autolabel_from_filenames.py --config config/pipeline.yaml ...
-
-# Step 4: Train species classifier (planned)
-# python training/train_classifier.py --config config/pipeline.yaml ...
-# Example evaluation (after training)
-# python training/eval_classifier.py --config config/pipeline.yaml --split test
-
-# Aggregate counts per video (after predictions available)
-# python scripts/40_counts_by_species.py --manifest data/crops_manifest.csv --predictions experiments/exp_003_species/predictions_test.csv
-```
-
-## Configuration
-
-Edit `config/pipeline.yaml` to adjust:
-- Detection thresholds and frame sampling rates
-- Tracking parameters and quality filters  
-- Auto-labeling rules and guardrails
-- Output paths and logging settings
-
-## Current Status
-
-✅ **Completed:**
-- Project structure and configuration
-- MegaDetector batch processing (`scripts/10_run_md_batch.py`)
-- ByteTrack production runner with Hungarian assignment (`scripts/20_run_tracking.py`)
-
-🚧 **In Progress:**
-- Tracking visualization + regression testing (`guides/GUIDE_BYTRACK.md` Steps 9-10)
-- Classification pipeline design & validation (`guides/GUIDE_CLASSIFICATION.md` Phase 1)
-
-🛠️ **Planned:**
-- Auto-label crops from filename metadata (`scripts/31_autolabel_from_filenames.py`)
-- Classifier training/evaluation scripts (`training/`)
-- Counts by species analytics (`scripts/40_counts_by_species.py`)
-- CVAT integration and manual review workflows
-
-## Contributing
-
-This is an active research project. Key areas needing development:
-
-1. **Tracking QA**: Finish visualization + regression tests for ByteTrack outputs
-2. **Autolabeling**: Build filename-based crop extraction with manual validation loop
-3. **Classification**: Implement training/evaluation scripts and manage class balance
-4. **Analytics & Docs**: Aggregate per-species counts, polish documentation, and integrate CVAT workflows
-
-## Hardware Requirements
-
-- **GPU**: CUDA-capable GPU recommended (tested with RTX series)
-- **Storage**: ~50GB+ for video processing (temp files can be large)
-- **RAM**: 16GB+ recommended for video processing
-
-## Background
-
-This pipeline is designed for camera trap footage from Uruguay, targeting 13 species classes. The approach combines state-of-the-art detection (MegaDetector) with practical annotation workflows (CVAT) and intelligent automation (auto-labeling with guardrails).
-
-The auto-labeling strategy is particularly useful for camera trap scenarios where:
-- Most videos contain 0-1 animals
-- Filenames contain species metadata  
-- Manual annotation is time-consuming
-- Quality control is critical
-
-### Dataset Strategy
-
-- **Tuning pool:** ~20 hand-curated videos processed on a Windows GPU workstation used to calibrate MegaDetector, ByteTrack, and upcoming classification steps
-- **Scale-up plan:** once the full pipeline is validated, run a larger corpus with consistent species stems in filenames (e.g., `margay001.mp4`, `capybara002.mp4`) curated manually
-- **Tracking:** keep tuning vs. production metrics separate to monitor generalization when the dataset expands
-
-## License
-
-[Add your license here]
-
-## Related Projects
-
-- [MegaDetector](https://github.com/microsoft/CameraTraps) - Animal detection in camera trap images
-- [ByteTrack](https://github.com/ifzhang/ByteTrack) - Multi-object tracking
-- [CVAT](https://github.com/opencv/cvat) - Computer Vision Annotation Tool
+## References
+- [MegaDetector](https://github.com/microsoft/CameraTraps)
+- [ByteTrack](https://github.com/ifzhang/ByteTrack)
+- [Torchvision](https://pytorch.org/vision/stable/index.html)
