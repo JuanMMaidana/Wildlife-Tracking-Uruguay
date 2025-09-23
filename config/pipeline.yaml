@@ -2,12 +2,14 @@
 # Main configuration file for the camera trap animal detection and classification pipeline
 
 paths:
-  videos_raw: "data/test_md_vids"
+  videos_raw: "data/dataset-v1"
   videos_work: "data/videos_work"  # optional: for re-encoded videos
   md_json: "data/md_json"
   tracks_json: "data/tracking_json"  # ByteTrack outputs (consistent naming)
   candidates: "data/candidates"
   autolabels: "data/autolabels"
+  crops: "data/crops"
+  crops_manifest: "data/crops_manifest.csv"
   cvat_exports: "data/cvat_exports"
   datasets: "data/datasets/species_cls"
   reports: "data/reports"
@@ -83,8 +85,42 @@ autolabel:
     - "margay:ocelote"          # confusable pairs
     - "gray_brocket:deer"
   
-  # Quality control
+# Quality control
   spot_check_ratio: 0.1         # randomly review 10% of auto-labels
+
+# Classification pipeline settings
+classification:
+  species_map: "config/species_map.yaml"
+  crop_padding: 0.05            # padding applied around bbox before cropping
+  neighbors: 2                  # base frames around representative frame (quality anchor)
+  min_track_len: 6              # minimum track length to consider for crops
+  max_crops_per_track: 8        # base limit for common species
+  skip_classes: ["no_animal", "unknown_animal"]
+  split_strategy: "by_video"    # dataset split granularity
+  random_seed: 42               # reproducibility for splitting
+  model: "resnet50"             # default backbone for training
+  epochs: 15
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  image_size: 224
+  balance_classes: true         # use weighted sampling in training loader
+  log_interval: 50              # training logging cadence (batches)
+  dataloader_workers: 4         # override num_workers for training loaders
+  eval_batch_size: 64           # batch size during evaluation/inference
+
+  # NEW: Species-specific crop targets (hybrid sampling)
+  species_crop_targets:         # target crops per track for each species
+    margay: 12                  # 6 tracks × 12 = 72 crops (was 18)
+    gray_brocket: 8             # 8 tracks × 8 = 64 crops (was 24)
+    hare: 8                     # 8 tracks × 8 = 64 crops (was 24)
+    skunk: 8                    # 8 tracks × 8 = 64 crops (was 24)
+    bird: 6                     # 11 tracks × 6 = 66 crops (was 32)
+    capybara: 6                 # 13 tracks × 6 = 78 crops (was 38)
+    armadillo: 8                # 9 tracks × 8 = 72 crops (was 54)
+    wild_boar: 6                # 15 tracks × 6 = 90 crops (was 45)
+    human: 6                    # 19 tracks × 6 = 114 crops (was 53)
+    cow: 4                      # 30 tracks × 4 = 120 crops (was 80)
+    dusky_legged_guan: 4        # 27 tracks × 4 = 108 crops (was 80)
 
 # Dataset splitting strategy
 split:
