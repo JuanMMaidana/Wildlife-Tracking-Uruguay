@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 from typing import Dict, List
 
@@ -17,6 +18,10 @@ try:
     import yaml  # type: ignore
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise RuntimeError("PyYAML is required to run classifier inference") from exc
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from training import data_utils
 from training import train_classifier as training_train_classifier
