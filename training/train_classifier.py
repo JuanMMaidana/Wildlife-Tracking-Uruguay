@@ -25,7 +25,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise RuntimeError("PyYAML is required to run the training script") from exc
 
-from training import data_utils
+import data_utils
 
 
 @dataclass

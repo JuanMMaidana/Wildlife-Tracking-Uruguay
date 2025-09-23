@@ -1,0 +1,19 @@
+{
+  "split": "test",
+  "checkpoint": "../experiments/exp_003_species/best_model.pt",
+  "accuracy": 0.9568345323741008,
+  "macro_f1": 0.9525724940958853,
+  "per_class_f1": {
+    "armadillo": 0.8421052631578948,
+    "bird": 0.9473684210526316,
+    "capybara": 0.9166666666666666,
+    "cow": 1.0,
+    "dusky_legged_guan": 0.9411764705882353,
+    "gray_brocket": 1.0,
+    "hare": 0.9523809523809523,
+    "human": 0.9696969696969697,
+    "margay": 0.9565217391304348,
+    "skunk": 0.9523809523809523,
+    "wild_boar": 1.0
+  }
+}

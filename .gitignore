@@ -82,6 +82,12 @@ logs/
 # Allow shared script helpers
 !/scripts/lib/
 
+# Allow experiment results (metrics, predictions, small models)
+!experiments/
+!experiments/**/*.json
+!experiments/**/*.csv
+!experiments/**/*.pt
+
 # OS generated files
 .DS_Store
 .DS_Store?
