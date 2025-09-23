@@ -113,6 +113,11 @@ python scripts/20_run_tracking.py
 
 # Step 4: Train species classifier (planned)
 # python training/train_classifier.py --config config/pipeline.yaml ...
+# Example evaluation (after training)
+# python training/eval_classifier.py --config config/pipeline.yaml --split test
+
+# Aggregate counts per video (after predictions available)
+# python scripts/40_counts_by_species.py --manifest data/crops_manifest.csv --predictions experiments/exp_003_species/predictions_test.csv
 ```
 
 ## Configuration

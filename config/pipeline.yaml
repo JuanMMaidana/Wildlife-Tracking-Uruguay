@@ -106,6 +106,7 @@ classification:
   balance_classes: true         # use weighted sampling in training loader
   log_interval: 50              # training logging cadence (batches)
   dataloader_workers: 4         # override num_workers for training loaders
+  eval_batch_size: 64           # batch size during evaluation/inference
 
   # NEW: Species-specific crop targets (hybrid sampling)
   species_crop_targets:         # target crops per track for each species

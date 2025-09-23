@@ -69,18 +69,18 @@ patterns:
 - **Current status**: 912 crops split into 634 train / 139 val / 139 test with excellent species balance
 - ✅ Implemented and tested both strategies; crop-level selected for optimal training stability
 
-### ⏳ Step 6: Classifier Training Scripts (`training/`)
-- ✅ `training/train_classifier.py`: full data pipeline (manifest parsing, crop/ video split support, torchvision transforms) and baseline training loop (ResNet50/MobileNetV3, AdamW, cosine LR, class balancing, metrics logging, best-checkpoint saving)
-- ⏳ `training/eval_classifier.py`: still needs model loading + metric export (top-1, per-class F1, confusion matrix)
+### ✅ Step 6: Classifier Training & Evaluation (`training/`)
+- ✅ `training/train_classifier.py`: full data pipeline (manifest parsing, crop/video split support, torchvision transforms) and baseline training loop (ResNet50/MobileNetV3, AdamW, cosine LR, class balancing, metrics logging, best-checkpoint saving)
+- ✅ `training/eval_classifier.py`: loads checkpoints, runs inference on chosen split, exports metrics (`eval_<split>.json`) and per-crop predictions CSV for downstream aggregation
 - ⏳ Record training/eval configs in `experiments/exp_003_species/params.yaml`
-- 🔄 Add dependency notes (torchvision extras, torchmetrics if used) to README/environment docs
-- Output artefacts: `experiments/exp_003_species/metrics.csv`, `metrics.json`, `best_model.pt`
+- 🔄 Add dependency notes (torchvision extras, torchmetrics if adopted) to README/environment docs
+- Output artefacts: `experiments/exp_003_species/metrics.csv`, `metrics.json`, `best_model.pt`, `predictions_<split>.csv`
 
-### ⏳ Step 7: Counts by Species (`scripts/40_counts_by_species.py`)
-- Load classifier predictions per track (majority vote or rep-frame)
-- Output `experiments/exp_004_counts/results.csv` with `video,species,n_tracks,avg_dwell_s`
-- Generate plots (bar charts, dwell distributions) to `experiments/exp_004_counts/plots/`
-- Handle `unknown_animal` gracefully (report but exclude from totals by default)
+### ✅ Step 7: Counts by Species (`scripts/40_counts_by_species.py`)
+- ✅ Implemented aggregation script: majority vote per track, confidence averaging, dwell time summary
+- ✅ Outputs: `experiments/exp_004_counts/track_predictions.csv` + `results.csv`
+- ⏳ Optional: add visualisations (bar plots, dwell distributions) under `experiments/exp_004_counts/plots/`
+- ✅ Handles missing predictions / confidence thresholds gracefully
 
 ### ⏳ Step 8: Validation & Tests
 - Smoke test: ensure ≥1 crop per eligible track on fixture video set
@@ -158,6 +158,7 @@ classification:
   balance_classes: true
   log_interval: 50
   dataloader_workers: 4
+  eval_batch_size: 64
 ```
 
 ## Directory Structure (New & Updated)
@@ -216,8 +217,8 @@ experiments/
 - [x] Step 3: Manual validation completed (912 crops validated across 87 videos)
 - [x] Step 4: Autolabel QA summaries (`exp_003_autolabel` artifacts complete)
 - [x] Step 5: Dataset splitting with dual strategies (video/crop-level) - 481029e
-- [ ] Step 6: Training/eval scripts under `training/`
-- [ ] Step 7: Counts aggregation script + results
+- [x] Step 6: Training/eval scripts under `training/` (full pipeline ready for GPU runs)
+- [x] Step 7: Counts aggregation script + results
 - [ ] Step 8: Validation harness & CI integration
 - [ ] Step 9: Documentation + portfolio assets
 

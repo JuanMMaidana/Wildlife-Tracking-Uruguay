@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Training entry point for wildlife species classification.
 
-This script reads the auto-labeled crop manifest and the generated dataset
-splits, builds PyTorch datasets/dataloaders, and trains a baseline classifier
-(ResNet50 or MobileNetV3-Large). Metrics are logged per epoch and the best
-checkpoint is persisted for later evaluation.
+Loads the crops manifest and dataset splits, builds PyTorch datasets/dataloaders,
+trains a baseline image classifier (ResNet50 or MobileNetV3-Large), and logs
+metrics/checkpoints for later evaluation.
 """
 
 from __future__ import annotations
@@ -15,18 +14,18 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
-from torchvision import models, transforms
-from PIL import Image
+from torchvision import models
 
 try:
     import yaml  # type: ignore
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise RuntimeError("PyYAML is required to run the training script") from exc
+
+from training import data_utils
 
 
 @dataclass
@@ -116,144 +115,15 @@ def load_splits(path: Path) -> Dict[str, List[str]]:
         return json.load(handle)
 
 
-def load_manifest_rows(manifest_path: Path) -> List[Dict[str, str]]:
-    with manifest_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required = {"crop_path", "species", "video_stem"}
-        if not reader.fieldnames or not required.issubset(reader.fieldnames):
-            missing = required.difference(reader.fieldnames or set())
-            raise ValueError(f"Manifest missing required columns: {', '.join(sorted(missing))}")
-        return list(reader)
-
-
-def normalize_rel_path(path_str: str) -> str:
-    return Path(path_str.replace("\\", "/")).as_posix()
-
-
-def determine_split_type(splits: Dict[str, Sequence[str]]) -> str:
-    sample_seq = next((seq for seq in splits.values() if seq), [])
-    if not sample_seq:
-        return "unknown"
-    sample = sample_seq[0]
-    return "crop" if sample.lower().endswith(".jpg") else "video"
-
-
-def build_label_mapping(rows: Iterable[Dict[str, str]]) -> Dict[str, int]:
-    species = sorted({row["species"] for row in rows})
-    return {label: idx for idx, label in enumerate(species)}
-
-
-class CropDataset(Dataset):
-    def __init__(
-        self,
-        manifest_rows: Iterable[Dict[str, str]],
-        crop_paths: Optional[Sequence[str]],
-        species_to_idx: Dict[str, int],
-        data_root: Path,
-        transform: transforms.Compose,
-    ) -> None:
-        self.transform = transform
-        allowed = {normalize_rel_path(p) for p in crop_paths} if crop_paths is not None else None
-        records: List[Tuple[Path, int, Dict[str, str]]] = []
-        for row in manifest_rows:
-            rel_path = normalize_rel_path(row["crop_path"])
-            if allowed is not None and rel_path not in allowed:
-                continue
-            label = species_to_idx[row["species"]]
-            full_path = data_root / Path(rel_path)
-            records.append((full_path, label, row))
-        if not records:
-            raise ValueError("No records found for split. Check splits.json and manifest paths.")
-        self.records = records
-        self.targets = [label for _, label, _ in records]
-
-    def __len__(self) -> int:
-        return len(self.records)
-
-    def __getitem__(self, idx: int):
-        path, label, metadata = self.records[idx]
-        if not path.exists():
-            raise FileNotFoundError(f"Crop not found: {path}")
-        image = Image.open(path).convert("RGB")
-        image = self.transform(image)
-        return image, label, metadata
-
-
-def build_transforms(image_size: int) -> Tuple[transforms.Compose, transforms.Compose]:
-    train_tf = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.02),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-    eval_tf = transforms.Compose(
-        [
-            transforms.Resize(int(image_size * 1.14)),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-    return train_tf, eval_tf
-
-
-def create_datasets(
-    cfg: TrainingConfig,
-    manifest_rows: List[Dict[str, str]],
-    splits: Dict[str, Sequence[str]],
-    split_type: str,
-) -> Tuple[Dict[str, CropDataset], Dict[str, int]]:
-    data_root = cfg.manifest_path.parent  # manifest lives inside data/
-    species_to_idx = build_label_mapping(manifest_rows)
-    train_tf, eval_tf = build_transforms(cfg.image_size)
-
-    def crop_paths_for_split(split_name: str) -> Optional[Sequence[str]]:
-        entries = splits.get(split_name, [])
-        if split_type == "crop":
-            return entries
-        # video-level: include all crops whose video stem is in the split
-        video_stems = {entry for entry in entries}
-        return [row["crop_path"] for row in manifest_rows if row["video_stem"] in video_stems]
-
-    datasets: Dict[str, CropDataset] = {}
-    for split in ("train", "validation", "test"):
-        crop_paths = crop_paths_for_split(split)
-        transform = train_tf if split == "train" else eval_tf
-        datasets[split] = CropDataset(
-            manifest_rows=manifest_rows,
-            crop_paths=crop_paths,
-            species_to_idx=species_to_idx,
-            data_root=data_root,
-            transform=transform,
-        )
-    return datasets, species_to_idx
-
-
-def create_dataloaders(datasets: Dict[str, CropDataset], cfg: TrainingConfig) -> Dict[str, DataLoader]:
-    loaders: Dict[str, DataLoader] = {}
-    for split, dataset in datasets.items():
-        shuffle = split == "train"
-        if split == "train" and cfg.balance_classes:
-            class_counts = Counter(dataset.targets)
-            class_weights = {cls: 1.0 / count for cls, count in class_counts.items()}
-            sample_weights = [class_weights[label] for label in dataset.targets]
-            sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
-            shuffle = False
-        else:
-            sampler = None
-
-        loaders[split] = DataLoader(
-            dataset,
-            batch_size=cfg.batch_size,
-            shuffle=shuffle,
-            sampler=sampler,
-            num_workers=cfg.num_workers,
-            pin_memory=True,
-        )
-    return loaders
+def save_metrics_csv(metrics: List[Dict[str, float]], path: Path) -> None:
+    if not metrics:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = list(metrics[0].keys())
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(metrics)
 
 
 def build_model(model_name: str, num_classes: int, device: str) -> nn.Module:
@@ -268,14 +138,14 @@ def build_model(model_name: str, num_classes: int, device: str) -> nn.Module:
         model = models.mobilenet_v3_large(weights=weights)
         in_features = model.classifier[-1].in_features
         model.classifier[-1] = nn.Linear(in_features, num_classes)
-    else:  # pragma: no cover - guard for unsupported models
+    else:  # pragma: no cover
         raise ValueError(f"Unsupported model: {model_name}")
     return model.to(device)
 
 
 def train_one_epoch(
     model: nn.Module,
-    dataloader: DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: str,
@@ -311,7 +181,7 @@ def train_one_epoch(
 
 def evaluate(
     model: nn.Module,
-    dataloader: DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     criterion: nn.Module,
     device: str,
     num_classes: int,
@@ -360,7 +230,7 @@ def save_metrics_csv(metrics: List[Dict[str, float]], path: Path) -> None:
     if not metrics:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = metrics[0].keys()
+    header = list(metrics[0].keys())
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=header)
         writer.writeheader()
@@ -379,13 +249,24 @@ def main() -> int:
     validate_inputs(cfg)
 
     splits = load_splits(cfg.splits_path)
-    manifest_rows = load_manifest_rows(cfg.manifest_path)
-    split_type = determine_split_type(splits)
+    manifest_rows = data_utils.load_manifest_rows(cfg.manifest_path)
+    split_type = data_utils.determine_split_type(splits)
     if split_type == "unknown":
         raise ValueError("Unable to determine split type from splits.json")
 
-    datasets, species_to_idx = create_datasets(cfg, manifest_rows, splits, split_type)
-    dataloaders = create_dataloaders(datasets, cfg)
+    datasets, species_to_idx = data_utils.create_datasets(
+        manifest_rows,
+        splits,
+        split_type,
+        data_root=cfg.manifest_path.parent,
+        image_size=cfg.image_size,
+    )
+    dataloaders = data_utils.create_dataloaders(
+        datasets,
+        batch_size=cfg.batch_size,
+        num_workers=cfg.num_workers,
+        balance_classes=cfg.balance_classes,
+    )
     num_classes = len(species_to_idx)
     idx_to_species = {idx: species for species, idx in species_to_idx.items()}
 
@@ -451,28 +332,32 @@ def main() -> int:
             )
             print(f"    ✅ Saved best checkpoint → {best_ckpt_path}")
 
-    # Final evaluation using best checkpoint
     print("\nEvaluating best model on test split...")
     if best_ckpt_path.exists():
         checkpoint = torch.load(best_ckpt_path, map_location=cfg.device)
         model.load_state_dict(checkpoint["model_state"])
+        species_to_idx = checkpoint.get("meta", {}).get("species_to_idx", species_to_idx)
+        idx_to_species = {idx: species for species, idx in species_to_idx.items()}
     test_metrics = evaluate(model, dataloaders["test"], criterion, cfg.device, num_classes)
     print(
         f"    Test loss: {test_metrics['loss']:.4f} | acc: {test_metrics['accuracy']:.4f} | F1: {test_metrics['macro_f1']:.4f}"
     )
 
-    # Persist metrics
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_csv = cfg.output_dir / "metrics.csv"
     save_metrics_csv(metrics_per_epoch, metrics_csv)
     metrics_json = cfg.output_dir / "metrics.json"
     with metrics_json.open("w", encoding="utf-8") as handle:
-        json.dump({
-            "epochs": metrics_per_epoch,
-            "best_val_macro_f1": best_val_f1,
-            "test_metrics": test_metrics,
-            "species_to_idx": species_to_idx,
-        }, handle, indent=2)
+        json.dump(
+            {
+                "epochs": metrics_per_epoch,
+                "best_val_macro_f1": best_val_f1,
+                "test_metrics": test_metrics,
+                "species_to_idx": species_to_idx,
+            },
+            handle,
+            indent=2,
+        )
 
     print(f"\nMetrics saved to {metrics_csv} and {metrics_json}")
     print(f"Best checkpoint: {best_ckpt_path}")
