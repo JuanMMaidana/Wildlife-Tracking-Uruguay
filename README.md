@@ -63,6 +63,16 @@ python training/eval_classifier.py --config config/pipeline.yaml --manifest data
 python scripts/40_counts_by_species.py --manifest data/crops_manifest.csv --predictions experiments/exp_003_species/predictions_test.csv --out-dir experiments/exp_004_counts
 ```
 
+### End-to-End Inference on New Footage
+```bash
+python scripts/run_inference_pipeline.py \
+  --videos data/video_inference \
+  --checkpoint experiments/exp_003_species/best_model.pt \
+  --output experiments/exp_005_inference
+```
+
+This command runs detection → tracking → crop extraction → classifier inference → species counts, and renders labeled MP4s under `experiments/exp_005_inference/videos_labeled/`.
+
 ## Repository Map
 ```
 wildlife-tracking-uruguay/

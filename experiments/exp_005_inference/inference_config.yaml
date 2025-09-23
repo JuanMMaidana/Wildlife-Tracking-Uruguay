@@ -1,0 +1,114 @@
+autolabel:
+  dominance:
+    max_secondary_coverage: 0.3
+    min_track_coverage: 0.8
+    require_single_track: true
+  enabled: true
+  exceptions:
+  - margay:ocelote
+  - gray_brocket:deer
+  quality:
+    max_border_frames_ratio: 0.5
+    min_area_median: 8000
+    min_confidence_mean: 0.6
+    min_track_length: 8
+  spot_check_ratio: 0.1
+classification:
+  balance_classes: true
+  crop_padding: 0.05
+  dataloader_workers: 4
+  epochs: 15
+  eval_batch_size: 64
+  image_size: 224
+  learning_rate: 0.0001
+  log_interval: 50
+  max_crops_per_track: 8
+  min_track_len: 6
+  model: resnet50
+  neighbors: 2
+  random_seed: 42
+  skip_classes: []
+  species_crop_targets:
+    armadillo: 8
+    bird: 6
+    capybara: 6
+    cow: 4
+    dusky_legged_guan: 4
+    gray_brocket: 8
+    hare: 8
+    human: 6
+    margay: 12
+    skunk: 8
+    wild_boar: 6
+  species_map: config/species_map.yaml
+  split_strategy: by_video
+  weight_decay: 0.0001
+hardware:
+  batch_size: 32
+  device: cuda
+  num_workers: 4
+logging:
+  level: INFO
+  progress_bars: true
+  save_intermediate: true
+  save_reports: true
+megadetector:
+  classes:
+  - 0
+  - 1
+  frame_stride: 2
+  img_size: 960
+  include_person: true
+  include_vehicle: false
+  iou_threshold: 0.55
+  max_detections: 5
+  md_export_threshold: 0.25
+  md_view_threshold: 0.25
+  min_area_ratio: 0.005
+  weights: models/detectors/md_v5a.0.0.pt
+paths:
+  autolabels: data/autolabels
+  candidates: data/candidates
+  crops: experiments/exp_005_inference/crops
+  crops_manifest: experiments/exp_005_inference/crops_manifest.csv
+  cvat_exports: data/cvat_exports
+  datasets: data/datasets/species_cls
+  md_json: experiments/exp_005_inference/md_json
+  preview_out: experiments/exp_005_inference/preview
+  reports: experiments/exp_005_inference/reports
+  tracks_json: experiments/exp_005_inference/tracking_json
+  videos_raw: data/dataset-v1
+  videos_work: data/videos_work
+sampling:
+  diversity:
+    enabled: true
+    iou_threshold: 0.9
+    min_area_ratio: 0.1
+  filters:
+    blur_threshold: 100
+    max_border_ratio: 0.8
+    min_area: 5000
+    min_confidence: 0.5
+  frame_stride: 5
+  max_per_video: 30
+  strategy: hybrid
+  topk_per_track: 16
+split:
+  random_seed: 42
+  strategy: by_video
+  test: 0.15
+  train: 0.7
+  validation: 0.15
+tracking:
+  class_map:
+    animal: animal
+    person: human
+  det_thresh: 0.25
+  include_person: true
+  match_thresh: 0.35
+  method: bytetrack
+  min_track_len: 8
+  nms_iou: 0.85
+  track_buffer_s: 2.5
+  track_thresh: 0.7
+  use_kalman: false

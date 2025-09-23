@@ -81,6 +81,8 @@ patterns:
 - ✅ Outputs: `experiments/exp_004_counts/track_predictions.csv` + `results.csv`
 - ⏳ Optional: add visualisations (bar plots, dwell distributions) under `experiments/exp_004_counts/plots/`
 - ✅ Handles missing predictions / confidence thresholds gracefully
+- ✅ New helper `scripts/run_inference_pipeline.py` orchestrates detection → tracking → crop extraction → classification → counts and renders labeled MP4s for folders such as `data/video_inference/`
+- ✅ `scripts/run_classifier_inference.py` offers standalone crop inference; `scripts/render_labeled_video.py` overlays predictions on the source MP4
 
 ### ⏳ Step 8: Validation & Tests
 - Smoke test: ensure ≥1 crop per eligible track on fixture video set
