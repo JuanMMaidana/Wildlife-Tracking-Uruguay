@@ -69,14 +69,14 @@ megadetector:
 paths:
   autolabels: data/autolabels
   candidates: data/candidates
-  crops: experiments/exp_005_inference/crops
-  crops_manifest: experiments/exp_005_inference/crops_manifest.csv
+  crops: experiments\exp_005_inference\crops
+  crops_manifest: experiments\exp_005_inference\crops_manifest.csv
   cvat_exports: data/cvat_exports
   datasets: data/datasets/species_cls
-  md_json: experiments/exp_005_inference/md_json
-  preview_out: experiments/exp_005_inference/preview
-  reports: experiments/exp_005_inference/reports
-  tracks_json: experiments/exp_005_inference/tracking_json
+  md_json: experiments\exp_005_inference\md_json
+  preview_out: experiments\exp_005_inference\preview
+  reports: experiments\exp_005_inference\reports
+  tracks_json: experiments\exp_005_inference\tracking_json
   videos_raw: data/dataset-v1
   videos_work: data/videos_work
 sampling:

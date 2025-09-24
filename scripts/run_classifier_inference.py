@@ -23,8 +23,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from training import data_utils
-from training import train_classifier as training_train_classifier
+# Add training directory to path for imports
+TRAINING_DIR = ROOT / "training"
+if str(TRAINING_DIR) not in sys.path:
+    sys.path.insert(0, str(TRAINING_DIR))
+
+import data_utils
+import train_classifier as training_train_classifier
 
 
 class InferenceDataset(Dataset):
@@ -75,7 +80,7 @@ def auto_device(value: str) -> str:
 def load_checkpoint(path: Path, device: str) -> Dict[str, object]:
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
-    return torch.load(path, map_location=device)
+    return torch.load(path, map_location=device, weights_only=False)
 
 
 def main() -> int:
